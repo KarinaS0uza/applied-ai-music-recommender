@@ -16,6 +16,19 @@ def normalize(value: str) -> str:
     )))
 
 
+def clean_text(value: str) -> str:
+    """Remove control and replacement characters so a title or artist displays as plain text.
+
+    `normalize` ignores such characters when matching, so a garbled name can still match a
+    clean candidate; this keeps the garbage out of what the listener sees. Tabs and newlines
+    become spaces, other control characters and U+FFFD are dropped, and spaces are collapsed.
+    """
+    value = value.replace("\t", " ").replace("\n", " ").replace("\r", " ")
+    return " ".join("".join(
+        c for c in value if c != "�" and unicodedata.category(c) != "Cc"
+    ).split())
+
+
 def clean_excerpt(value: str) -> str:
     """Strip markdown and URLs from a search fragment so it reads as plain text."""
     value = re.sub(r"!\[[^]]*\]\([^)]*\)", "", value)

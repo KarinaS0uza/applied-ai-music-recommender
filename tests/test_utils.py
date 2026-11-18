@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.utils import clean_excerpt, normalize, platform_search_links, safe_url
+from src.utils import clean_excerpt, clean_text, normalize, platform_search_links, safe_url
 
 
 # --- normalize -----------------------------------------------------------------------------
@@ -92,3 +92,19 @@ def test_platform_search_links_encode_the_query():
     assert links["YouTube search"].endswith("search_query=Rock%20%26%20Roll%3F%20AC%2FDC")
     assert links["Spotify search"].endswith("/search/Rock%20%26%20Roll%3F%20AC%2FDC")
     assert all(safe_url(url) for url in links.values())
+
+
+@pytest.mark.parametrize("raw, expected", [
+    ("\x10\ufffd\x10\ufffd\ufffd\ufffd\u00c1guas de Mar\u00e7o", "\u00c1guas de Mar\u00e7o"),
+    ("So\x00 What\x1f", "So What"),
+    ("Take\tFive\n", "Take Five"),
+    ("  Blue   in  Green ", "Blue in Green"),
+    ("Caf\u00e9 \u6771\u4eac", "Caf\u00e9 \u6771\u4eac"),
+])
+def test_clean_text_drops_control_and_replacement_characters_but_keeps_real_text(raw, expected):
+    assert clean_text(raw) == expected
+
+
+def test_clean_text_is_idempotent():
+    once = clean_text("\x10\ufffdA\tB")
+    assert clean_text(once) == once

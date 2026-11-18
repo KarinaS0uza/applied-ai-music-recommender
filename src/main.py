@@ -94,8 +94,11 @@ def main() -> None:
             video = rec.video
             if video:
                 print(f"YouTube video: {video.url} ({video.title} — {video.channel})")
+            track = rec.track
+            if track:
+                print(f"Spotify track: {track.url} ({track.title} — {track.artist})")
             for label, url in platform_search_links(rec.title, rec.artist).items():
-                if video and label == "YouTube search":
+                if (video and label == "YouTube search") or (track and label == "Spotify search"):
                     continue
                 print(f"{label}: {url}")
         for warning in result.warnings:

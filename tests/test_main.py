@@ -8,7 +8,7 @@ import pytest
 
 from src import main as cli
 from src.models import (DiscoveryError, DiscoveryResult, Evidence, MusicRequest, Recommendation,
-                        VideoLink)
+                        TrackLink, VideoLink)
 
 
 def run_cli(monkeypatch, *args):
@@ -61,6 +61,18 @@ def test_query_prints_the_exact_video_instead_of_the_youtube_search(monkeypatch,
     out = capsys.readouterr().out
     assert "YouTube video: https://www.youtube.com/watch?v=dQw4w9WgXcQ (Take Five — Dave Brubeck - Topic)" in out
     assert "YouTube search" not in out and "Spotify search: https://" in out
+
+
+def test_query_prints_the_exact_spotify_track_instead_of_the_search(monkeypatch, capsys):
+    """Query prints the exact Spotify track instead of the Spotify search."""
+    track = TrackLink("11dFghVXANMlKmJXsNCbNl", "Take Five", "Dave Brubeck")
+    result = DiscoveryResult([Recommendation("Take Five", "Dave Brubeck Quartet", "Five-beat jazz.", [], [],
+                                             track=track)], [], [])
+    with patch("src.composition.find_music", return_value=result):
+        run_cli(monkeypatch, "--query", "jazz")
+    out = capsys.readouterr().out
+    assert "Spotify track: https://open.spotify.com/track/11dFghVXANMlKmJXsNCbNl (Take Five — Dave Brubeck)" in out
+    assert "Spotify search" not in out and "YouTube search: https://" in out
 
 
 def test_query_failure_exits_with_the_safe_message(monkeypatch, capsys):

@@ -19,11 +19,13 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.providers import Settings
 from src.composition import find_music
-from src.models import DiscoveryError, MusicRequest
+from src.discovery import INTENT_FALLBACK_NOTICE, UNVERIFIED_WARNING_PREFIX
+from src.models import DiscoveryError, DiscoveryResult, MusicRequest, ParsedIntent, TasteCriterion
 from src.utils import platform_search_links
 from src.validation import validate_request
 from src.recommender import (RANKING_STRATEGIES, load_songs, match_fraction,
-                             recommend_songs, resolve_genres, suggest_genres)
+                             recommend_songs, resolve_genres, suggest_genres,
+                             trait_match_fractions)
 
 logger = logging.getLogger(__name__)
 ROOT = Path(__file__).resolve().parents[1]
@@ -111,7 +113,8 @@ STYLE = """
     margin: 1.5rem 0 0.75rem; padding: 1.25rem; border: 1px dashed color-mix(in srgb, var(--music-wash) 16%, transparent);
     border-radius: 1rem; color: var(--music-muted); background: color-mix(in srgb, var(--music-wash) 2%, transparent);
 }
-.request-summary { margin: 0.35rem 0 0.9rem; }
+/* Sits under the Discover music form, so it lines up with the form's inner text. */
+.request-summary { margin: 0.35rem 0 0.9rem; padding-inline: 1.35rem; }
 .request-summary span {
     display: block; color: var(--music-muted); font-size: 0.7rem; font-weight: 750;
     letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 0.18rem;
@@ -213,6 +216,9 @@ STYLE = """
     margin-top: auto;
 }
 .stApp :is([class*="st-key-song_links_"], [class*="st-key-catalog_song_links_"]) { padding-top: 0.5rem; }
+/* Streamlit gives every markdown block margin-bottom: -1rem to cancel a paragraph's margin.
+   The logo row is not a paragraph, so that pulled it 1rem past the card's bottom padding. */
+.stApp [data-testid="stMarkdownContainer"]:has(> .platform-logos) { margin-bottom: 0; }
 .platform-logos { display: flex; align-items: center; gap: 0.5rem; }
 .stApp .platform-logos a.platform-logo-link {
     display: inline-flex; align-items: center; justify-content: center;
@@ -226,12 +232,28 @@ STYLE = """
 .stApp .platform-logos a.platform-logo-link:focus-visible { outline: 2px solid var(--music-violet); outline-offset: 2px; }
 .platform-logo-link svg { width: 1.35rem; height: 1.35rem; display: block; }
 .catalog-summary {
-    display: flex; align-items: center; justify-content: space-between; gap: 1rem;
     margin: 2.2rem 0 1rem; padding: 1rem 1.1rem; border: 1px solid var(--music-border);
     border-radius: 1rem; background: color-mix(in srgb, var(--music-wash) 3%, transparent);
 }
-.catalog-summary-copy strong { display: block; color: var(--music-strong); font-size: 1.15rem; letter-spacing: -0.02em; }
-.catalog-summary-copy span { display: block; color: var(--music-muted); font-size: 0.82rem; margin-top: 0.2rem; }
+.catalog-summary-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.catalog-summary-head strong { color: var(--music-strong); font-size: 1.15rem; letter-spacing: -0.02em; }
+.catalog-tags { display: flex; flex-wrap: wrap; gap: 0.45rem; margin-top: 0.75rem; }
+.catalog-tags span {
+    display: inline-flex; align-items: center; min-height: 1.8rem; padding: 0.2rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--music-wash) 12%, transparent); border-radius: 999px;
+    background: color-mix(in srgb, var(--music-wash) 6%, transparent); color: var(--music-soft);
+    font-size: 0.8rem; font-weight: 650; line-height: 1.2;
+}
+.catalog-tags span.is-any { border-style: dashed; background: transparent; color: var(--music-muted); font-weight: 550; }
+/* An ignored tag is the one warm cue: nothing in the collection matched it. */
+.catalog-tags span.is-ignored {
+    border-color: light-dark(rgb(166 106 0 / 40%), rgb(245 196 81 / 38%));
+    background: light-dark(rgb(166 106 0 / 9%), rgb(245 196 81 / 10%));
+    color: light-dark(#7A4B00, #F5C451);
+}
+.catalog-summary-note { margin-top: 0.7rem; color: var(--music-muted); font-size: 0.84rem; line-height: 1.5; }
+.catalog-tags + .catalog-summary-note { margin-top: 0.85rem; }
+.catalog-reason-label + .catalog-tags { margin-top: 0; }
 .catalog-summary-badge {
     flex: 0 0 auto; padding: 0.4rem 0.65rem; border: 1px solid rgb(57 217 255 / 24%);
     border-radius: 999px; color: var(--music-cyan-ink); background: rgb(57 217 255 / 8%);
@@ -255,8 +277,9 @@ STYLE = """
     .stMainBlockContainer { padding: 2rem 1rem 3rem; }
     .stApp h1 { font-size: 2.7rem; }
     .stApp [data-testid="stForm"] { padding: 1rem; }
+    .request-summary { padding-inline: 1rem; }
     .stApp :is([class*="st-key-song_card_"], [class*="st-key-catalog_song_card_"]) { padding: 1rem; }
-    .catalog-summary { align-items: flex-start; flex-direction: column; }
+    .catalog-summary-head { align-items: flex-start; flex-direction: column; }
     .choice-divider { min-height: auto; flex-direction: row; margin: 0.5rem 0 1.5rem; }
     .choice-divider::before, .choice-divider::after { width: 5.5rem; height: 1px; }
 }
@@ -275,7 +298,11 @@ def server_settings():
     """Merge the process environment with Streamlit secrets so provider keys can come from either."""
     values = dict(os.environ)
     try:
-        for name in ("TAVILY_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL", "MUSICBRAINZ_CONTACT", "YOUTUBE_API_KEY"):
+        for name in ("TAVILY_API_KEY", "GEMINI_API_KEY", "GEMINI_MODEL",
+                     "GEMINI_EMBEDDING_MODEL", "SEMANTIC_RETRIEVAL_ENABLED",
+                     "MUSIC_SOURCE_FOCUS_ENABLED",
+                     "MUSICBRAINZ_CONTACT", "YOUTUBE_API_KEY",
+                     "SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"):
             if name in st.secrets:
                 values[name] = st.secrets[name]
     except (FileNotFoundError, st.errors.StreamlitSecretNotFoundError):
@@ -367,22 +394,42 @@ def catalog_song_summary(song: dict) -> str:
     return f"A {mood} {genre} track with {energy_label} energy.".replace("  ", " ")
 
 
-def show_catalog_fallback(intent) -> bool:
-    """Show one local-catalog pick when discovery cannot verify a web match."""
+CATALOG_FALLBACK_SIZE = 5
+
+
+def catalog_fallback_picks(intent) -> list:
+    """Rank the local CSV catalog for the request: up to five (song, match, traits, reasons) rows.
+
+    Returns [] when the catalog cannot be read or has nothing to offer, so the caller can fall
+    through to the next fallback.
+    """
     try:
         songs = load_songs(str(ROOT / "data/songs.csv"))
         strategy = RANKING_STRATEGIES["genre-first"]
         preferences = catalog_preferences(intent)
         preferences["genre"] = resolve_genres(preferences["genre"], songs) or preferences["genre"]
-        rows = recommend_songs(preferences, songs, k=1, strategy=strategy)
-        match = match_fraction(preferences, rows[0][0], strategy) if rows else 0.0
+        rows = recommend_songs(preferences, songs, k=CATALOG_FALLBACK_SIZE, strategy=strategy)
+        return [(song, match_fraction(preferences, song, strategy),
+                 trait_match_fractions(preferences, song), reasons)
+                for song, _, reasons in rows]
     except (OSError, ValueError, KeyError):
         logger.warning("catalog_fallback_failed", exc_info=True)
-        return False
-    if not rows:
-        return False
+        return []
 
-    song, _, reasons = rows[0]
+
+def show_catalog_fallback(picks) -> None:
+    """Show the catalog songs found for a request discovery could not verify on the web."""
+    st.caption("We could not verify a web recommendation, so here are songs from the local CSV catalog.")
+    section_heading("results-heading", "Backup picks", "From the catalog")
+    for start in range(0, len(picks), 3):
+        columns = st.columns(3, gap="medium")
+        for offset, (song, match, fractions, reasons) in enumerate(picks[start:start + 3]):
+            with columns[offset]:
+                show_catalog_fallback_card(song, match, fractions, reasons, start + offset + 1)
+
+
+def show_catalog_fallback_card(song, match, fractions, reasons, rank) -> None:
+    """Render one backup catalog song with its match score, reason and platform links."""
     matched_traits = [
         label for marker, label in (
             ("genre match", "genre"),
@@ -394,11 +441,8 @@ def show_catalog_fallback(intent) -> bool:
         ) if marker in reasons
     ]
     matched_traits = list(dict.fromkeys(matched_traits))
-
-    st.caption("We could not verify a web recommendation, so here is one option from the local CSV catalog.")
-    section_heading("results-heading", "A backup pick", "From the catalog")
-    with st.container(border=True, key="song_card_catalog_fallback"):
-        st.caption(f"CATALOG FALLBACK  ·  {match:.0%} MATCH SCORE")
+    with st.container(border=True, key=f"song_card_catalog_fallback_{rank}"):
+        st.caption(f"CATALOG FALLBACK {rank:02}  ·  {match:.0%} MATCH SCORE")
         st.markdown(
             f'<div class="song-identity"><div class="song-title">{escape(song["title"])}</div>'
             f'<div class="song-artist">{escape(song["artist"])}</div></div>',
@@ -407,13 +451,37 @@ def show_catalog_fallback(intent) -> bool:
         st.text(catalog_song_summary(song))
         st.markdown(
             '<div class="catalog-reason-label">Why it fits</div>'
-            f'<div class="catalog-reason">{escape(catalog_reason_text(reasons))}</div>',
+            f'<div class="catalog-reason">{escape(catalog_reason_text(reasons, fractions))}</div>',
             unsafe_allow_html=True,
         )
         if matched_traits:
             st.caption("Matched on " + ", ".join(matched_traits) + ".")
-        show_platform_links(song["title"], song["artist"], "song_links_catalog_fallback")
-    return True
+        show_platform_links(song["title"], song["artist"], f"song_links_catalog_fallback_{rank}")
+
+
+def intent_from_text(text: str) -> ParsedIntent:
+    """Guess a rough intent from the raw request, for when discovery failed before parsing it.
+
+    Catalog genres and moods named in the text become preferences; everything else is left out,
+    so an unclear request ranks on energy alone.
+    """
+    words = set(normalize_words(text))
+    criteria = []
+    try:
+        songs = load_songs(str(ROOT / "data/songs.csv"))
+    except (OSError, ValueError, KeyError):
+        songs = []
+    for facet in ("genre", "mood"):
+        names = sorted({str(song.get(facet, "")).strip().lower() for song in songs} - {"", "unknown"})
+        criteria += [TasteCriterion(facet, "preference", name, 2, name)
+                     for name in names if set(name.split()) <= words]
+    criteria.append(TasteCriterion("energy", "preference", " ".join(sorted(words)), 1, text))
+    return ParsedIntent(criteria, [text])
+
+
+def normalize_words(text: str) -> list[str]:
+    """Split text into lowercase words."""
+    return re.findall(r"[a-z0-9']+", text.lower())
 
 
 # Brand marks (24x24 viewBox) keyed by the labels platform_search_links() returns.
@@ -437,8 +505,8 @@ PLATFORM_LOGOS = {
 }
 
 
-def platform_links_html(title: str, artist: str, video=None) -> str:
-    """Logo-only links to YouTube and Spotify; YouTube opens the exact video when one was matched."""
+def platform_links_html(title: str, artist: str, video=None, track=None) -> str:
+    """Logo-only links to YouTube and Spotify; each opens the exact video or track when one was matched."""
     links = []
     for label, url in platform_search_links(title, artist).items():
         color, path = PLATFORM_LOGOS[label]
@@ -446,6 +514,9 @@ def platform_links_html(title: str, artist: str, video=None) -> str:
         if video is not None and name == "YouTube":
             url, hint = video.url, "Watch on YouTube"
             aria = f"Watch {video.title} by {video.channel} on YouTube"
+        elif track is not None and name == "Spotify":
+            url, hint = track.url, "Listen on Spotify"
+            aria = f"Listen to {track.title} by {track.artist} on Spotify"
         else:
             hint, aria = f"Search {name}", f"Search {name} for {title} by {artist}"
         links.append(
@@ -457,12 +528,12 @@ def platform_links_html(title: str, artist: str, video=None) -> str:
     return f'<div class="platform-logos">{"".join(links)}</div>'
 
 
-def show_platform_links(title: str, artist: str, key: str, video=None) -> None:
+def show_platform_links(title: str, artist: str, key: str, video=None, track=None) -> None:
     """Render the platform search links, plus the matched video caption when there is one."""
     with st.container(key=key):
         if video is not None:
             st.caption(literal_caption(f"▶ {compact_text(video.title, 60)} · {compact_text(video.channel, 30)}"))
-        st.markdown(platform_links_html(title, artist, video), unsafe_allow_html=True)
+        st.markdown(platform_links_html(title, artist, video, track), unsafe_allow_html=True)
 
 
 def section_heading(style: str, label: str, title: str) -> None:
@@ -491,14 +562,18 @@ def discovery_note(title: str, message: str) -> None:
     )
 
 
-def show_song_card(rec, rank):
-    """Render one recommendation as a numbered card with its score, explanation and links."""
+def show_song_card(rec, rank, unverified=()):
+    """Render one recommendation as a numbered card with its score, explanation and links.
+
+    ``unverified`` lists the requirements no song could be confirmed to meet; the card then says
+    it is not verified and names them, instead of looking like a match.
+    """
     score = getattr(rec, "fit_score", None)
     scored = bool(score)  # no real score is 0; None (or a stale 0.0) means never validated
     # Unscored cards quote the source, so they grow taller than a one-line explanation needs.
     with st.container(border=True, key=f"song_card_{rank}"):
         st.caption(f"DISCOVERY {rank:02}  ·  "
-                   + (f"{score:.0%} MATCH SCORE" if scored else "NOT SCORED"))
+                   + (f"{score:.0%} MATCH SCORE" if scored else "NOT VERIFIED" if unverified else "NOT SCORED"))
         st.markdown(
             f'<div class="song-identity"><div class="song-title">{escape(rec.title)}</div>'
             f'<div class="song-artist">{escape(rec.artist)}</div></div>',
@@ -509,10 +584,15 @@ def show_song_card(rec, rank):
             f'<div class="catalog-reason">{escape(compact_text(rec.explanation, 145 if scored else 300))}</div>',
             unsafe_allow_html=True,
         )
-        if rec.uncertainties:
+        if unverified:
+            tags = "".join(f'<span class="is-ignored">{escape(label)}</span>' for label in unverified)
+            st.markdown('<div class="catalog-reason-label">Couldn’t confirm</div>'
+                        f'<div class="catalog-tags">{tags}</div>', unsafe_allow_html=True)
+        elif rec.uncertainties:
             count = len(rec.uncertainties)
             st.caption(f"{count} detail{'s' if count != 1 else ''} couldn’t be confirmed")
-        show_platform_links(rec.title, rec.artist, f"song_links_{rank}", getattr(rec, "video", None))
+        show_platform_links(rec.title, rec.artist, f"song_links_{rank}", getattr(rec, "video", None),
+                             getattr(rec, "track", None))
 
 
 def video_fallback_source(evidence):
@@ -549,43 +629,70 @@ def show_video_fallback(evidence, metadata_unverified: bool = False) -> bool:
     return True
 
 
-def catalog_reason_text(reasons: str) -> str:
-    """Turn scoring internals into short, listener-friendly card copy."""
+def catalog_reason_text(reasons: str, fractions: dict | None = None) -> str:
+    """Turn scoring internals into short, listener-friendly card copy.
+
+    ``fractions`` maps a reason label ("genre match") to how well the song matches it, from
+    0 to 1; a reason found there is followed by that percentage instead of its raw points.
+    """
     labels = []
     for reason in reasons.split(";"):
         reason = reason.strip()
         if not reason or "penalty" in reason:
             continue
         label = re.sub(r"\s*\([^)]*\)\s*$", "", reason).strip()
-        labels.append(label.capitalize())
+        text = label.capitalize()
+        if fractions and label in fractions:
+            text += f" {fractions[label]:.0%}"
+        labels.append(text)
     return " · ".join(labels) or "Closest available catalog match"
 
 
-def catalog_query_notes(genre, mood, matched, rows, songs, strategy) -> list:
-    """Explain, as (level, text) pairs, when typed labels do not line up with the catalog."""
-    notes = []
-    if genre and not matched:
+def catalog_query_summary(genre, mood, energy, matched, rows, songs, strategy) -> dict:
+    """Describe how the typed genre, mood and energy line up with the collection.
+
+    Returns ``{"tags": [(text, kind)], "lines": [str]}``. Each tag is one part of the request,
+    and its kind is "ok", "any" (left blank) or "ignored" (nothing in the collection matched,
+    so it did not affect the ranking). ``lines`` holds short explanations, usually none.
+    """
+    tags, lines = [], []
+    if not genre:
+        tags.append(("any genre", "any"))
+    elif matched:
+        if [genre.lower()] == matched:
+            tags.append((genre, "ok"))
+        else:
+            more = f" +{len(matched) - 3} more" if len(matched) > 3 else ""
+            tags.append((f"{genre} → {', '.join(matched[:3])}{more}", "ok"))
+    else:
+        tags.append((f"{genre} · no match", "ignored"))
         related = suggest_genres(genre, songs)
         hint = f" Related genres: {', '.join(related)}." if related else ""
-        notes.append(("warning", f"No catalog genre matches “{genre}”, so genre did not "
-                                 f"affect these results.{hint}"))
-    elif matched:
-        if [genre.lower()] != matched:
-            shown = ", ".join(matched[:6]) + (f" and {len(matched) - 6} more" if len(matched) > 6 else "")
-            notes.append(("info", f"“{genre}” matched catalog genres: {shown}."))
+        lines.append(f"No genre in our collection matches “{genre}”, so genre was ignored.{hint}")
+
+    moods = {str(song.get("mood", "")).strip().lower() for song in songs}
+    if not mood:
+        tags.append(("any mood", "any"))
+    elif mood.lower() in moods:
+        tags.append((mood, "ok"))
+    else:
+        tags.append((f"{mood} · no match", "ignored"))
+        lines.append(f"No song in our collection is labeled “{mood}”, so mood was ignored.")
+
+    tags.append((f"{energy:.0%} target energy", "ok"))
+
+    if matched:
         in_genre = sum(1 for song, _, _ in rows if song["genre"] in matched)
         if in_genre < len(rows) and strategy.key != "genre-first":
-            notes.append(("info", f"Only {in_genre} of {len(rows)} results are in those genres. "
-                                  f"{strategy.label} ranking weighs mood and energy alongside "
-                                  "genre; choose Genre-First to rank genre above them."))
-    moods = {str(song.get("mood", "")).strip().lower() for song in songs}
-    if mood and mood.lower() not in moods:
-        notes.append(("warning", f"No catalog song is labeled “{mood}”, so mood did not "
-                                 "affect these results."))
-    return notes
+            where = ", ".join(matched) if len(matched) <= 3 else "the matched genres"
+            lead = "None of these songs are" if not in_genre else f"Only {in_genre} of {len(rows)} songs are"
+            ranking = strategy.label.removesuffix(" (Default)")
+            lines.append(f"{lead} in {where}. {ranking} ranking weighs mood and energy alongside "
+                         "genre; try Genre-First to put genre first.")
+    return {"tags": tags, "lines": lines}
 
 
-def show_catalog_card(song, match, reasons, rank):
+def show_catalog_card(song, match, reasons, rank, fractions=None):
     """Present a scored CSV result with the same hierarchy as discovery cards."""
     with st.container(border=True, key=f"catalog_song_card_{rank}"):
         st.caption(f"CATALOG {rank:02}  ·  {match:.0%} MATCH SCORE")
@@ -603,88 +710,103 @@ def show_catalog_card(song, match, reasons, rank):
         st.markdown(f'<div class="catalog-meta">{pills}</div>', unsafe_allow_html=True)
         st.markdown(
             '<div class="catalog-reason-label">Why it fits</div>'
-            f'<div class="catalog-reason">{escape(catalog_reason_text(reasons))}</div>',
+            f'<div class="catalog-reason">{escape(catalog_reason_text(reasons, fractions))}</div>',
             unsafe_allow_html=True,
         )
         show_platform_links(song["title"], song["artist"], f"catalog_song_links_{rank}")
 
 
-def show_catalog_results(rows, genre: str, mood: str, energy: float,
-                         matches, notes=()) -> None:
-    """Render ranked catalog cards and keep the full scoring table available.
+def show_catalog_results(rows, matches, summary, traits=None) -> None:
+    """Render the request summary and the ranked catalog cards.
 
     ``matches`` holds each row's match fraction (0 to 1), in the same order as ``rows``.
+    ``summary`` is what ``catalog_query_summary`` returned for the request.
+    ``traits`` holds each row's per-trait match fractions (genre, mood, energy), in the same order.
     """
-    safe_genre = escape(genre or "any genre")
-    safe_mood = escape(mood or "any mood")
+    tags = "".join(f'<span class="is-{kind}">{escape(text)}</span>' for text, kind in summary["tags"])
+    lines = "".join(f'<div class="catalog-summary-note">{escape(line)}</div>' for line in summary["lines"])
     st.markdown(
         '<div class="catalog-summary">'
-        '<div class="catalog-summary-copy"><strong>Your catalog matches</strong>'
-        f'<span>{safe_genre} · {safe_mood} · {energy:.0%} target energy</span></div>'
-        f'<div class="catalog-summary-badge">{len(rows)} songs found</div></div>',
+        '<div class="catalog-summary-head"><strong>Your catalog matches</strong>'
+        f'<div class="catalog-summary-badge">{len(rows)} songs found</div></div>'
+        f'<div class="catalog-tags">{tags}</div>{lines}</div>',
         unsafe_allow_html=True,
     )
-    for level, text in notes:
-        (st.warning if level == "warning" else st.info)(text)
     for start in range(0, len(rows), 3):
         columns = st.columns(3, gap="medium")
         for offset, (song, _, reasons) in enumerate(rows[start:start + 3]):
             with columns[offset]:
-                show_catalog_card(song, matches[start + offset], reasons, start + offset + 1)
-    with st.expander("View scoring details"):
-        st.caption("Match is the share of the best possible score for the genre, mood and "
-                   "energy you chose: 100% means every preference matched. Points are the "
-                   "raw totals behind it, after any repeat-artist or repeat-genre penalty.")
-        st.dataframe(
-            [{"Title": song["title"], "Artist": song["artist"], "Match": f"{match:.0%}",
-              "Points": round(score, 2), "Reasons": reasons}
-             for (song, score, reasons), match in zip(rows, matches)],
-            hide_index=True,
-            width="stretch",
-        )
+                index = start + offset
+                show_catalog_card(song, matches[index], reasons, index + 1,
+                                  traits[index] if traits else None)
+
+
+def show_request_summary(result) -> None:
+    """Show how the request was understood: the preferences and the must-haves."""
+    intent = getattr(result, "intent", None)
+    if not intent:
+        return
+    for label, criteria in (("Your vibe", intent.preferences),
+                            ("Your must-haves", intent.hard_criteria)):
+        values = [criterion.value.strip().capitalize() for criterion in criteria]
+        if values:
+            request_summary(label, values)
 
 
 def show_result(result):
-    """Render a discovery result: the parsed request, the song cards and their sources."""
+    """Render a discovery result: the song cards and their sources."""
     sources = {e.id: e for e in result.evidence}
     recommendations = list(result.recommendations)
     intent = getattr(result, "intent", None)
-    if intent:
-        for label, criteria in (("Your vibe", intent.preferences),
-                                ("Your must-haves", intent.hard_criteria)):
-            values = [criterion.value.strip().capitalize() for criterion in criteria]
-            if values:
-                request_summary(label, values)
     metadata_messages = [warning for warning in result.warnings
                          if warning.startswith("MusicBrainz ")]
-    video_available = video_fallback_source(result.evidence) is not None and not recommendations
+    unverified = getattr(result, "unverified_requirements", [])
+    # The catalog comes first: songs no check could verify (or none at all) are replaced by ranked
+    # catalog songs. Unverified songs, a related video and the plain message only follow if the
+    # catalog gives nothing.
+    catalog_picks = catalog_fallback_picks(intent) if (not recommendations or unverified) else []
+    if catalog_picks:
+        recommendations = []
+        unverified = []
+    video_available = (video_fallback_source(result.evidence) is not None
+                       and not recommendations and not catalog_picks)
     for warning in result.warnings:
         explains_missing_match = (
             warning.startswith("No candidate had evidence")
             or warning == "The retrieved evidence did not establish a supported recommendation."
+            or warning.startswith(UNVERIFIED_WARNING_PREFIX)
         )
-        if warning in metadata_messages or (video_available and explains_missing_match):
+        if warning in metadata_messages or ((video_available or catalog_picks) and explains_missing_match):
             continue
-        st.warning(warning)
+        if warning == INTENT_FALLBACK_NOTICE:
+            st.info(warning)
+        else:
+            st.warning(warning)
     metadata_messages.extend(getattr(result, "notices", []))
-    if metadata_messages and not recommendations and not video_available:
+    if metadata_messages and not recommendations and not video_available and not catalog_picks:
         st.caption("Metadata note: Some recording details could not be verified.")
     if recommendations:
-        if not any(getattr(rec, "fit_score", None) for rec in recommendations):
+        if unverified:
+            caption = None  # the warning above already says these songs are not verified
+        elif not any(getattr(rec, "fit_score", None) for rec in recommendations):
             caption = "These songs came up in your search, but we couldn’t confirm they match your request."
         elif getattr(result, "used_partial_matches", False):
             caption = "Here are the closest matches we found. Some details may vary by recording."
         else:
             caption = "Here are a few matches to explore."
-        st.caption(caption)
-        section_heading("results-heading", "Made for this moment", "Fresh finds")
-    elif not show_video_fallback(result.evidence, bool(metadata_messages)) and not show_catalog_fallback(intent):
+        if caption:
+            st.caption(caption)
+        section_heading("results-heading", *(("Not verified", "Songs to check") if unverified
+                                             else ("Made for this moment", "Fresh finds")))
+    elif catalog_picks:
+        show_catalog_fallback(catalog_picks)
+    elif not show_video_fallback(result.evidence, bool(metadata_messages)):
         st.caption("No evidence-backed matches are available for this request yet.")
     for start in range(0, len(recommendations), 3):
         columns = st.columns(3, gap="medium")
         for offset, rec in enumerate(recommendations[start:start + 3]):
             with columns[offset]:
-                show_song_card(rec, start + offset + 1)
+                show_song_card(rec, start + offset + 1, unverified)
     if recommendations:
         with st.expander("Why these songs?"):
             st.caption(
@@ -743,6 +865,11 @@ def clear_results() -> None:
         st.session_state.pop(key, None)
 
 
+def keep_catalog_fallback(description: str) -> None:
+    """After discovery fails, hand show_result an empty result so it offers catalog songs."""
+    st.session_state["discovery_result"] = DiscoveryResult([], [], [], intent_from_text(description))
+
+
 def main():
     """Build the Streamlit page with the discovery and catalog forms and show their results."""
     st.set_page_config(page_title="Music Discovery", page_icon="🎵", layout="centered")
@@ -751,7 +878,7 @@ def main():
     st.caption("Find music that fits how you want to listen—and explore the sources behind every recommendation.")
     discovery, choice, catalog = st.columns([1, 0.14, 1], gap="small", vertical_alignment="top")
     with discovery:
-        section_heading("mode-heading", "Explore beyond the catalog", "Discover music")
+        section_heading("mode-heading", "Explore beyond our collection", "Discover music")
         with st.form("discovery", border=False):
             description = st.text_area("What would you like to hear?", max_chars=1200,
                 placeholder="A mood, a language, an instrument, a moment. For example: quiet piano for studying, without vocals.")
@@ -775,20 +902,28 @@ def main():
                 display = st.warning if error.code == "invalid_input" else st.error
                 display(str(error))
                 logger.info("discovery_failed code=%s", error.code)
+                if error.code != "invalid_input":
+                    keep_catalog_fallback(description)
             except Exception as error:
                 logger.warning("discovery_failed code=unexpected type=%s", type(error).__name__)
                 st.error("Discovery could not finish. Please try again later.")
+                keep_catalog_fallback(description)
+        # The collection panel is taller, so the request summary fills the space under the Find
+        # music box. It is reserved here but filled in below, once both forms have cleared or
+        # replaced the old results.
+        summary_area = st.container()
     with choice:
         st.markdown('<div class="choice-divider"><span>OR</span></div>', unsafe_allow_html=True)
     with catalog:
-        section_heading("mode-heading", "Use the prepared collection", "Music Collection")
+        section_heading("mode-heading", "Use our prepared collection", "Music Collection")
         with st.form("catalog", border=False):
-            st.caption("Choose a genre, mood, and energy level from the catalog.")
-            genre = st.text_input("Preferred genre", value="pop")
-            mood = st.text_input("Preferred mood", value="happy")
+            st.caption("Choose a genre, mood, and energy level from the catalog. "
+                       "Leave genre or mood blank to rank on the rest.")
+            genre = st.text_input("Preferred genre", placeholder="pop")
+            mood = st.text_input("Preferred mood", placeholder="happy")
             energy = st.slider("Target energy", 0.0, 1.0, 0.7)
             strategy = st.radio(
-                "Ranking strategy",
+                "What’s most important to you?",
                 list(RANKING_STRATEGIES),
                 format_func=lambda name: RANKING_STRATEGIES[name].label,
                 horizontal=True,
@@ -806,25 +941,22 @@ def main():
                 rows = recommend_songs(preferences, songs, strategy=ranking)
                 st.session_state["catalog_results"] = {
                     "rows": rows,
-                    "genre": genre.strip(),
-                    "mood": mood.strip(),
-                    "energy": energy,
                     "matches": [match_fraction(preferences, song, ranking) for song, _, _ in rows],
-                    "notes": catalog_query_notes(genre.strip(), mood.strip(), matched,
-                                                 rows, songs, ranking),
+                    "traits": [trait_match_fractions(preferences, song) for song, _, _ in rows],
+                    "summary": catalog_query_summary(genre.strip(), mood.strip(), energy, matched,
+                                                     rows, songs, ranking),
                 }
             except (OSError, ValueError, KeyError):
                 st.error("The CSV catalog could not be read. Check its file format and location.")
-    if "matches" not in st.session_state.get("catalog_results", {"matches": ()}):
+    if not {"summary", "traits"} <= st.session_state.get("catalog_results", {"summary": 0, "traits": 0}).keys():
         del st.session_state["catalog_results"]  # saved by an older version of this page
     if "catalog_results" in st.session_state:
         catalog_result = st.session_state["catalog_results"]
-        show_catalog_results(
-            catalog_result["rows"], catalog_result["genre"],
-            catalog_result["mood"], catalog_result["energy"],
-            catalog_result["matches"], catalog_result["notes"],
-        )
+        show_catalog_results(catalog_result["rows"], catalog_result["matches"],
+                             catalog_result["summary"], catalog_result["traits"])
     if "discovery_result" in st.session_state:
+        with summary_area:
+            show_request_summary(st.session_state["discovery_result"])
         show_result(st.session_state["discovery_result"])
     elif "catalog_results" not in st.session_state:
         st.markdown(
@@ -832,8 +964,8 @@ def main():
             'Start with a few details about what you\'d like to hear.</div>',
             unsafe_allow_html=True,
         )
-    st.caption("Spotify links open a search. YouTube links open the matching video when we’re confident "
-               "of it, and a search otherwise.")
+    st.caption("Spotify and YouTube links open the exact track or video when we’re confident of the match, "
+               "and a search otherwise.")
 
 
 if __name__ == "__main__":

@@ -11,10 +11,11 @@ import pytest
 from streamlit.testing.v1 import AppTest
 
 import src.app as app_module
-from src.app import (catalog_preferences, catalog_query_notes, catalog_reason_text,
+from src.app import (catalog_preferences, catalog_query_summary, catalog_reason_text,
                      catalog_song_summary, compact_text, literal_caption, platform_links_html,
                      readable_source_excerpt, server_settings, source_kind_label,
                      video_fallback_source)
+from src.discovery import INTENT_FALLBACK_NOTICE
 from src.models import (DiscoveryError, DiscoveryResult, Evidence, MusicRequest, ParsedIntent,
                         Recommendation, SupportedClaim, TasteCriterion, VideoLink)
 from src.recommender import RANKING_STRATEGIES
@@ -171,7 +172,8 @@ def test_metadata_notice_is_not_rendered_as_a_warning(app):
         warnings=[],
         notices=["MusicBrainz identity matches do not confirm musical fit."],
     )
-    with patch("src.composition.find_music", return_value=result):
+    with patch("src.composition.find_music", return_value=result), \
+            patch("src.recommender.load_songs", side_effect=OSError("missing")):
         submit(app, "instrumental jazz")
 
     assert not app.warning
@@ -179,28 +181,30 @@ def test_metadata_notice_is_not_rendered_as_a_warning(app):
     assert not app.exception
 
 
-def test_empty_discovery_recommends_one_csv_catalog_fallback(app):
-    """Empty discovery recommends one csv catalog fallback."""
+def test_empty_discovery_recommends_csv_catalog_songs_as_the_first_fallback(app):
+    """Empty discovery shows every catalog song it can rank, not just one."""
     intent = ParsedIntent([
         TasteCriterion("genre", "preference", "pop", 2, "pop"),
         TasteCriterion("mood", "preference", "happy", 3, "happy"),
         TasteCriterion("energy", "preference", "high energy", 2, "high energy"),
     ], ["happy high energy pop"])
-    result = DiscoveryResult([], [], ["No supported web match was found."], intent)
+    video = Evidence("web_1", "web", "Happy pop mix", "upbeat", "https://www.youtube.com/watch?v=example")
+    result = DiscoveryResult([], [video], ["No supported web match was found."], intent)
 
     with patch("src.composition.find_music", return_value=result):
         submit(app, "happy high energy pop")
 
     visible_copy = [element.value for kind in ("caption", "text", "markdown") for element in app.get(kind)]
     rendered = "\n".join(visible_copy)
-    assert "CATALOG FALLBACK" in rendered
-    assert "From the catalog" in rendered
+    assert "CATALOG FALLBACK 01" in rendered and "CATALOG FALLBACK 05" in rendered
+    assert "From the catalog" in rendered and "Backup picks" in rendered
     assert "Sunrise City" in rendered
     assert "Neon Echo" in rendered
     assert "MATCH SCORE" in rendered
     assert "Why it fits" in rendered
-    assert "Energy similarity" in rendered
-    assert "one option from the local CSV catalog" in rendered
+    assert re.search(r"Energy similarity \d+%", rendered)
+    assert "songs from the local CSV catalog" in rendered
+    assert "RELATED VIDEO" not in rendered  # the catalog comes before the video
     assert not app.exception
 
 
@@ -217,7 +221,8 @@ def test_empty_discovery_recommends_related_youtube_video_with_friendly_note(app
         "https://www.youtube.com/watch?v=example",
     )], ["No candidate had evidence supporting every required trait."], intent)
 
-    with patch("src.composition.find_music", return_value=result):
+    with patch("src.composition.find_music", return_value=result), \
+            patch("src.recommender.load_songs", side_effect=OSError("missing")):
         submit(app, "I want to hear a korean ballad")
 
     visible_copy = [element.value for kind in ("caption", "text", "markdown", "warning")
@@ -286,13 +291,26 @@ def test_partial_matches_and_enhancement_warnings_are_explained(app):
     assert not app.exception
 
 
+def test_intent_fallback_is_a_soft_note_not_a_warning(app):
+    """Intent fallback is a soft note not a warning."""
+    result = DiscoveryResult(
+        [Recommendation("Take Five", "Dave Brubeck Quartet", "Five-beat jazz.", ["web_1"], [],
+                        fit_score=0.9)],
+        [Evidence("web_1", "web", "Source title", "Evidence", "https://example.org/music")],
+        [INTENT_FALLBACK_NOTICE])
+    with patch("src.composition.find_music", return_value=result):
+        submit(app, "instrumental jazz")
+    assert [info.value for info in app.info] == [INTENT_FALLBACK_NOTICE]
+    assert not app.warning and not app.exception
+
+
 def test_catalog_mode_works_without_api_calls(app):
     """Catalog mode works without api calls."""
     with patch("src.composition.find_music") as service:
         app.run()
         app.button[1].click().run()
     service.assert_not_called()
-    assert len(app.dataframe[0].value) == 5
+    assert len(ranked(app)) == 5 and len(match_cards(app)) == 5
     assert not app.exception
 
 
@@ -305,6 +323,14 @@ def discovery_result():
         [], ParsedIntent([], []))
 
 
+def test_catalog_ranks_on_energy_alone_when_genre_and_mood_are_blank(app):
+    """Catalog ranks on energy alone when genre and mood are blank."""
+    rank_catalog(app, "", "")
+    assert len(ranked(app)) == 5 and len(match_cards(app)) == 5
+    assert not app.warning and not app.exception
+    assert "any genre" in summary_card(app) and "any mood" in summary_card(app)
+
+
 def test_ranking_catalog_removes_previous_discovery_results(app):
     """Ranking catalog removes previous discovery results."""
     with patch("src.composition.find_music", return_value=discovery_result()):
@@ -315,7 +341,7 @@ def test_ranking_catalog_removes_previous_discovery_results(app):
 
     assert "discovery_result" not in app.session_state
     assert "Take Five" not in str(app)
-    assert len(app.dataframe[0].value) == 5
+    assert len(ranked(app)) == 5 and len(match_cards(app)) == 5
     assert not app.exception
 
 
@@ -323,14 +349,14 @@ def test_finding_music_removes_previous_catalog_results(app):
     """Finding music removes previous catalog results."""
     app.run()
     app.button[1].click().run()
-    assert app.dataframe and "catalog_results" in app.session_state
+    assert match_cards(app) and "catalog_results" in app.session_state
 
     with patch("src.composition.find_music", return_value=discovery_result()):
         app.text_area[0].set_value("instrumental jazz")
         app.button[0].click().run()
 
     assert "catalog_results" not in app.session_state
-    assert not app.dataframe
+    assert not match_cards(app)
     assert "Take Five" in str(app)
     assert not app.exception
 
@@ -347,8 +373,18 @@ def test_failed_discovery_does_not_leave_old_catalog_results(app):
 
     service.assert_not_called()
     assert "catalog_results" not in app.session_state
-    assert not app.dataframe
+    assert not match_cards(app)
     assert app.warning
+
+
+def ranked(app):
+    """The (song, score, reasons) rows behind the catalog cards currently on the page."""
+    return app.session_state["catalog_results"]["rows"]
+
+
+def match_cards(app):
+    """The caption of every catalog song card on the page."""
+    return [caption.value for caption in app.caption if "MATCH SCORE" in caption.value]
 
 
 def rank_catalog(app, genre, mood, strategy="current"):
@@ -368,25 +404,43 @@ def test_catalog_cards_show_a_percentage_not_raw_points(app):
     assert len(cards) == 5
     assert all(re.search(r"\d+% MATCH SCORE", value) for value in cards)
     assert not any(re.search(r"\d\.\d\d MATCH", value) for value in cards)
-    assert {"Title", "Artist", "Match", "Points", "Reasons"} <= set(app.dataframe[0].value.columns)
+    # Like Discover music, the results have no separate scoring table behind an expander.
+    assert not app.dataframe
+    assert not any("scoring details" in expander.label.lower() for expander in app.expander)
 
 
 def test_brazilian_funk_finds_the_funk_songs_instead_of_energy_only_matches(app):
     """Brazilian funk finds the funk songs instead of energy only matches."""
-    captions = rank_catalog(app, "Brazilian funk", "happy", strategy="genre-first")
-    notes = [element.value for element in app.info] + [element.value for element in app.warning]
-    assert any("matched catalog genres: funk carioca, funk melody" in note for note in notes)
-    assert not app.warning
-    genres = set(app.dataframe[0].value["Reasons"])
-    assert all("genre match" in reasons for reasons in genres)
+    rank_catalog(app, "Brazilian funk", "happy", strategy="genre-first")
+    summary = summary_card(app)
+    assert "Brazilian funk → funk carioca, funk melody" in summary
+    assert not app.warning and not app.info
+    assert all("genre match" in reasons for _, _, reasons in ranked(app))
+
+
+def summary_card(app):
+    """The HTML of the catalog summary card shown above the ranked songs."""
+    return next(element.value for element in app.markdown if 'class="catalog-summary"' in element.value)
 
 
 def test_catalog_explains_when_the_genre_or_mood_matches_nothing(app):
     """Catalog explains when the genre or mood matches nothing."""
     rank_catalog(app, "brazilian jazz", "party")
-    warnings = [element.value for element in app.warning]
-    assert any("No catalog genre matches “brazilian jazz”" in text for text in warnings)
-    assert any("No catalog song is labeled “party”" in text for text in warnings)
+    summary = summary_card(app)
+    assert '<span class="is-ignored">brazilian jazz · no match</span>' in summary
+    assert '<span class="is-ignored">party · no match</span>' in summary
+    assert "No genre in our collection matches “brazilian jazz”" in summary
+    assert "No song in our collection is labeled “party”" in summary
+    assert not app.warning and not app.info
+
+
+def test_the_summary_is_one_card_with_no_separate_banners(app):
+    """The request, its notes and the song count share one card instead of stacked banners."""
+    rank_catalog(app, "Brazilian funk", "calm", strategy="current")
+    summary = summary_card(app)
+    assert "5 songs found" in summary
+    assert "calm · no match" in summary and "target energy" in summary
+    assert not app.warning and not app.info and not app.error
 
 
 def test_missing_server_configuration_is_safe(app, monkeypatch):
@@ -428,7 +482,8 @@ def test_song_cards_size_to_their_content_so_long_text_cannot_run_under_the_link
         app.text_area[0].set_value("happy pop")
         app.button[0].click().run()
     fallback_cards = card_blocks(app.main)
-    assert [card.key for card in fallback_cards] == ["song_card_catalog_fallback"]
+    assert [card.key for card in fallback_cards] == [
+        f"song_card_catalog_fallback_{rank}" for rank in range(1, 6)]
 
     app.button[1].click().run()
     catalog_cards = card_blocks(app.main)
@@ -473,6 +528,19 @@ def test_source_and_reason_copy_hide_markup_and_scoring_internals():
         "genre match (+1.0); artist repetition penalty (-1.50); energy similarity (+1.80)"
     ) == "Genre match · Energy similarity"
     assert catalog_reason_text("") == "Closest available catalog match"
+    assert catalog_reason_text(
+        "genre match (+1.0); mood match (+1.0); energy similarity (+1.80); language match (+1.0)",
+        {"genre match": 1.0, "mood match": 1.0, "energy similarity": 0.9},
+    ) == "Genre match 100% · Mood match 100% · Energy similarity 90% · Language match"
+
+
+def test_catalog_cards_show_genre_mood_and_energy_as_percentages(app):
+    """Each catalog card's "Why it fits" gives the genre, mood and energy match as a percentage."""
+    captions = rank_catalog(app, "pop", "happy")
+    reasons = [e.value for e in app.markdown if "catalog-reason\">" in e.value]
+    assert reasons and all(re.search(r"Energy similarity \d+%", value) for value in reasons)
+    assert any("Genre match 100%" in value and "Mood match 100%" in value for value in reasons)
+    assert not any(re.search(r"\(\+\d", value) for value in reasons)  # no raw points
 
 
 # --- text helpers --------------------------------------------------------------------------
@@ -565,45 +633,65 @@ CATALOG_SONGS = [{"genre": genre, "subgenre": "", "mood": "happy", "language": [
                  for genre in ("funk carioca", "rock", "pop")]
 
 
-def notes(genre, mood, matched, rows=(), strategy="current"):
-    """Return the catalog notes for a genre and mood request."""
-    return catalog_query_notes(genre, mood, matched, list(rows), CATALOG_SONGS, RANKING_STRATEGIES[strategy])
+def summary(genre, mood, matched, rows=(), strategy="current", energy=0.5):
+    """Return the catalog summary for a genre, mood and energy request."""
+    return catalog_query_summary(genre, mood, energy, matched, list(rows), CATALOG_SONGS,
+                                 RANKING_STRATEGIES[strategy])
 
 
-def test_an_unmatched_genre_warns_and_names_related_catalog_genres():
-    """An unmatched genre warns and names related catalog genres."""
-    assert notes("carioca", "", []) == [("warning", "No catalog genre matches “carioca”, so genre did not "
-                                                    "affect these results. Related genres: funk carioca.")]
-    assert notes("zzz", "", [])[0][1].endswith("did not affect these results.")  # nothing related to suggest
+def test_blank_genre_and_mood_show_as_any_and_the_energy_is_always_listed():
+    """Blank genre and mood show as any and the energy is always listed."""
+    assert summary("", "", [], energy=0.11) == {"tags": [
+        ("any genre", "any"), ("any mood", "any"), ("11% target energy", "ok")], "lines": []}
 
 
-def test_a_genre_resolved_to_another_label_is_explained_but_an_exact_label_is_not():
-    """A genre resolved to another label is explained but an exact label is not."""
-    assert notes("baile funk", "", ["funk carioca"]) == [("info", "“baile funk” matched catalog genres: funk carioca.")]
-    assert notes("Pop", "", ["pop"]) == []
+def test_an_unmatched_genre_is_ignored_and_names_related_catalog_genres():
+    """An unmatched genre is ignored and names related catalog genres."""
+    result = summary("carioca", "", [])
+    assert result["tags"][0] == ("carioca · no match", "ignored")
+    assert result["lines"] == ["No genre in our collection matches “carioca”, so genre was ignored. "
+                               "Related genres: funk carioca."]
+    assert summary("zzz", "", [])["lines"] == [
+        "No genre in our collection matches “zzz”, so genre was ignored."]  # nothing related to suggest
+
+
+def test_a_genre_resolved_to_another_label_shows_the_label_but_an_exact_label_does_not():
+    """A genre resolved to another label shows the label but an exact label does not."""
+    assert summary("baile funk", "", ["funk carioca"])["tags"][0] == ("baile funk → funk carioca", "ok")
+    assert summary("Pop", "", ["pop"])["tags"][0] == ("Pop", "ok")
+    assert summary("Pop", "", ["pop"])["lines"] == []
 
 
 def test_a_long_list_of_matched_genres_is_shortened():
     """A long list of matched genres is shortened."""
     matched = [f"genre {n}" for n in range(8)]
-    assert notes("many", "", matched) == [(
-        "info", "“many” matched catalog genres: genre 0, genre 1, genre 2, genre 3, genre 4, genre 5 and 2 more.")]
+    assert summary("many", "", matched)["tags"][0] == ("many → genre 0, genre 1, genre 2 +5 more", "ok")
 
 
 def test_results_outside_the_matched_genres_are_explained_unless_genre_already_ranks_first():
     """Results outside the matched genres are explained unless genre already ranks first."""
     rows = [({"genre": "funk carioca"}, 4.0, ""), ({"genre": "rock"}, 2.0, "")]
-    assert notes("funk carioca", "", ["funk carioca"], rows) == [(
-        "info", "Only 1 of 2 results are in those genres. Balanced (Default) ranking weighs mood and energy "
-                "alongside genre; choose Genre-First to rank genre above them.")]
-    assert notes("funk carioca", "", ["funk carioca"], rows, strategy="genre-first") == []
+    assert summary("funk carioca", "", ["funk carioca"], rows)["lines"] == [
+        "Only 1 of 2 songs are in funk carioca. Balanced ranking weighs mood and energy alongside "
+        "genre; try Genre-First to put genre first."]
+    assert summary("funk carioca", "", ["funk carioca"], rows, strategy="genre-first")["lines"] == []
 
 
-def test_a_mood_no_catalog_song_has_warns_whatever_its_case():
-    """A mood no catalog song has warns whatever its case."""
-    assert notes("", "Party", []) == [("warning", "No catalog song is labeled “Party”, so mood did not "
-                                                  "affect these results.")]
-    assert notes("", "HAPPY", []) == []
+def test_no_results_in_the_matched_genres_says_none_not_only_zero():
+    """No results in the matched genres says none, not only zero."""
+    rows = [({"genre": "rock"}, 2.0, ""), ({"genre": "pop"}, 1.0, "")]
+    [line] = summary("funk", "", ["funk carioca", "funk melody"], rows)["lines"]
+    assert line.startswith("None of these songs are in funk carioca, funk melody. ")
+    assert "Only 0" not in line
+
+
+def test_a_mood_no_catalog_song_has_is_ignored_whatever_its_case():
+    """A mood no catalog song has is ignored whatever its case."""
+    result = summary("", "Party", [])
+    assert result["tags"][1] == ("Party · no match", "ignored")
+    assert result["lines"] == ["No song in our collection is labeled “Party”, so mood was ignored."]
+    assert summary("", "HAPPY", [])["tags"][1] == ("HAPPY", "ok")
+    assert summary("", "HAPPY", [])["lines"] == []
 
 
 def test_video_fallback_picks_the_first_web_page_hosted_on_youtube():
@@ -623,10 +711,17 @@ def test_streamlit_secrets_override_the_environment(monkeypatch):
     """Streamlit secrets override the environment."""
     monkeypatch.setenv("TAVILY_API_KEY", "env-tavily")
     monkeypatch.setenv("GEMINI_API_KEY", "env-gemini")
-    with patch.object(app_module.st, "secrets", {"TAVILY_API_KEY": "secret-tavily", "YOUTUBE_API_KEY": "secret-yt"}):
+    with patch.object(app_module.st, "secrets", {
+            "TAVILY_API_KEY": "secret-tavily", "YOUTUBE_API_KEY": "secret-yt",
+            "GEMINI_EMBEDDING_MODEL": "secret-embedding",
+            "SEMANTIC_RETRIEVAL_ENABLED": "false",
+            "MUSIC_SOURCE_FOCUS_ENABLED": "false"}):
         settings = server_settings()
     assert (settings.tavily_api_key, settings.gemini_api_key, settings.youtube_api_key) == (
         "secret-tavily", "env-gemini", "secret-yt")
+    assert settings.gemini_embedding_model == "secret-embedding"
+    assert settings.semantic_retrieval_enabled is False
+    assert settings.music_source_focus_enabled is False
 
 
 @pytest.mark.parametrize("missing", [FileNotFoundError, app_module.st.errors.StreamlitSecretNotFoundError])
@@ -664,14 +759,15 @@ def test_empty_state_invites_a_first_search_until_something_is_shown(app):
 def test_footer_explains_what_the_platform_links_do(app):
     """Footer explains what the platform links do."""
     app.run()
-    assert any("Spotify links open a search" in caption.value for caption in app.caption)
+    assert any("exact track or video" in caption.value for caption in app.caption)
 
 
 def test_forms_start_with_the_documented_defaults_and_limits(app):
     """Forms start with the documented defaults and limits."""
     app.run()
     assert (app.text_area[0].max_chars, app.text_input[0].max_chars) == (1200, 200)
-    assert (app.text_input[1].value, app.text_input[2].value, app.slider[0].value) == ("pop", "happy", 0.7)
+    assert (app.text_input[1].value, app.text_input[2].value, app.slider[0].value) == ("", "", 0.7)
+    assert (app.text_input[1].placeholder, app.text_input[2].placeholder) == ("pop", "happy")
     assert app.radio[0].options == ["Balanced (Default)", "Genre-First", "Mood-First", "Energy-Focused"]
     assert app.radio[0].value == "current"
 
@@ -714,7 +810,7 @@ def test_an_unreadable_csv_is_reported_instead_of_crashing_the_catalog(app):
         app.button[1].click().run()
     assert [error.value for error in app.error] == [
         "The CSV catalog could not be read. Check its file format and location."]
-    assert not app.dataframe and "fixture-secret-csv-path" not in str(app) and not app.exception
+    assert not match_cards(app) and "fixture-secret-csv-path" not in str(app) and not app.exception
 
 
 def test_a_failing_catalog_fallback_degrades_to_the_plain_message(app):
@@ -731,17 +827,20 @@ def test_a_failing_catalog_fallback_degrades_to_the_plain_message(app):
 def test_catalog_summary_names_the_request_and_counts_the_songs(app):
     """Catalog summary names the request and counts the songs."""
     rank_catalog(app, "", "")
-    summary = next(element.value for element in app.markdown if 'class="catalog-summary"' in element.value)
-    assert "any genre · any mood · 70% target energy" in summary and "5 songs found" in summary
+    summary = summary_card(app)
+    assert all(tag in summary for tag in ('<span class="is-any">any genre</span>',
+                                          '<span class="is-any">any mood</span>',
+                                          '<span class="is-ok">70% target energy</span>'))
+    assert "5 songs found" in summary
     assert not app.warning and not app.exception
 
 
 def test_catalog_input_is_trimmed_and_case_insensitive(app):
     """Catalog input is trimmed and case insensitive."""
     rank_catalog(app, "pop", "happy")
-    expected = list(app.dataframe[0].value["Title"])
+    expected = [song["title"] for song, _, _ in ranked(app)]
     rank_catalog(app, "  POP ", " Happy ")
-    assert list(app.dataframe[0].value["Title"]) == expected
+    assert [song["title"] for song, _, _ in ranked(app)] == expected
 
 
 def test_catalog_results_saved_by_an_older_version_are_discarded(app):
@@ -766,6 +865,94 @@ def test_summary_lists_preferences_and_must_haves_separately_and_escapes_markup(
     assert "&lt;i&gt;calm&lt;/i&gt;" in html and "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "A &amp; B" in html and "&lt;img src=x onerror=1&gt;" in html
     assert not any(raw in html for raw in ("<script>", "<img", "<i>"))
+    assert not app.exception
+
+
+def test_the_summary_sits_under_the_discover_form_not_with_the_results(app):
+    """Your vibe and Your must-haves fill the space under Find music, in the left column."""
+    intent = ParsedIntent([TasteCriterion("mood", "preference", "calm", 2, "calm"),
+                           TasteCriterion("language", "must_have", "korean", 3, "korean")], ["korean calm"])
+    result = DiscoveryResult(
+        [Recommendation("Take Five", "Dave Brubeck Quartet", "Why.", ["web_1"], [], fit_score=0.5)],
+        [Evidence("web_1", "web", "Source", "text", "https://example.org/a")], [], intent)
+    with patch("src.composition.find_music", return_value=result):
+        submit(app, "korean calm")
+    discover, _, collection = app.columns[:3]
+    assert "Your vibe" in html_of(discover) and "Your must-haves" in html_of(discover)
+    assert "Your vibe" not in html_of(collection)
+    assert html_of(app).count("Your vibe") == 1 and html_of(app).count("Your must-haves") == 1
+    assert not app.exception
+
+
+def test_the_summary_disappears_when_the_discovery_results_do(app):
+    """A catalog search clears the discovery results, so their summary goes with them."""
+    intent = ParsedIntent([TasteCriterion("mood", "preference", "calm", 2, "calm")], ["calm"])
+    with patch("src.composition.find_music", return_value=DiscoveryResult([], [], [], intent)):
+        submit(app, "calm")
+    assert "Your vibe" in html_of(app)
+    app.button[1].click().run()
+    assert "Your vibe" not in html_of(app) and not app.exception
+
+
+def test_unverified_songs_are_labeled_and_name_what_could_not_be_confirmed(app):
+    """Songs no check could verify never look like matches: the card, the tags and the heading all say so."""
+    intent = ParsedIntent([TasteCriterion("vocals", "must_have", "clean singing", 3, "clean singing"),
+                           TasteCriterion("vocals", "must_avoid", "screaming", 3, "no screaming")], ["metal"])
+    song = Recommendation("Du Hast", "Rammstein", "“Du Hast by Rammstein.”", ["web_1"],
+                          ["We couldn't confirm clean singing.", "We couldn't confirm no screaming."],
+                          [SupportedClaim("The source names it.", "web_1", "Du Hast by Rammstein")])
+    warning = ("We couldn't confirm that any song meets every requirement (clean singing; no screaming). "
+               "These songs are only named by their sources, so check them before you rely on them.")
+    result = DiscoveryResult([song], [Evidence("web_1", "web", "Metal", "Du Hast by Rammstein", "https://example.org/a")],
+                             [warning], intent, unverified_requirements=["clean singing", "no screaming"])
+    with patch("src.composition.find_music", return_value=result), \
+            patch("src.recommender.load_songs", side_effect=OSError("missing")):
+        submit(app, "clean singing metal with no screaming")
+    captions = [caption.value for caption in app.caption]
+    assert any("NOT VERIFIED" in caption for caption in captions)
+    assert not any("MATCH SCORE" in caption or "NOT SCORED" in caption for caption in captions)
+    assert not any("details couldn’t be confirmed" in caption for caption in captions)  # the tags say it instead
+    html = html_of(app)
+    assert '<span class="is-ignored">clean singing</span>' in html
+    assert '<span class="is-ignored">no screaming</span>' in html
+    assert "Songs to check" in html and "Fresh finds" not in html
+    assert [element.value for element in app.warning] == [warning]
+    assert not app.exception
+
+
+def test_catalog_songs_replace_unverified_songs_when_the_catalog_works(app):
+    """Unverified songs only appear if the catalog fallback fails."""
+    intent = ParsedIntent([TasteCriterion("vocals", "must_have", "clean singing", 3, "clean singing")], ["metal"])
+    song = Recommendation("Du Hast", "Rammstein", "“Du Hast by Rammstein.”", ["web_1"], [])
+    warning = "We couldn't confirm that any song meets every requirement (clean singing). Check them."
+    result = DiscoveryResult([song], [Evidence("web_1", "web", "Metal", "Du Hast by Rammstein", "https://example.org/a")],
+                             [warning], intent, unverified_requirements=["clean singing"])
+    with patch("src.composition.find_music", return_value=result):
+        submit(app, "clean singing metal")
+    captions = [caption.value for caption in app.caption]
+    assert any("CATALOG FALLBACK 01" in caption for caption in captions)
+    assert not any("NOT VERIFIED" in caption for caption in captions)
+    assert "Du Hast" not in html_of(app) and not app.warning and not app.exception
+
+
+def test_a_failed_discovery_falls_back_to_catalog_songs(app):
+    """When Discover music errors out, the error is shown and so are catalog songs."""
+    app.run()
+    app.text_area[0].set_value("happy pop")
+    with patch("src.composition.find_music", side_effect=DiscoveryError("quota", "Quota reached. Try later.")):
+        app.button[0].click().run()
+    assert [error.value for error in app.error] == ["Quota reached. Try later."]
+    captions = [caption.value for caption in app.caption]
+    assert any("CATALOG FALLBACK 01" in caption for caption in captions)
+    assert not app.exception
+
+
+def test_invalid_input_does_not_trigger_the_catalog_fallback(app):
+    """A request that fails validation is the listener's to fix, so no backup songs appear."""
+    app.run()
+    app.text_area[0].set_value("   ")
+    app.button[0].click().run()
+    assert not any("CATALOG FALLBACK" in caption.value for caption in app.caption)
     assert not app.exception
 
 
@@ -816,7 +1003,8 @@ def test_related_video_note_mentions_unconfirmed_recording_details(app):
     """Related video note mentions unconfirmed recording details."""
     video = Evidence("web_1", "web", "Romantic Korean Ballads", "soulful", "https://www.youtube.com/watch?v=example")
     result = DiscoveryResult([], [video], ["MusicBrainz is unavailable; recording versions remain uncertain."])
-    with patch("src.composition.find_music", return_value=result):
+    with patch("src.composition.find_music", return_value=result), \
+            patch("src.recommender.load_songs", side_effect=OSError("missing")):
         submit(app, "korean ballad")
     assert "We also couldn’t confirm every recording detail." in html_of(app)
     assert not app.warning and not app.exception
