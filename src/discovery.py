@@ -7,8 +7,9 @@ import logging
 import re
 import time
 
-from src.models import (Candidate, DiscoveryError, DiscoveryResult, Evidence, MusicRequest,
-                        ParsedIntent, Recommendation, SupportedClaim)
+from src.models import (MAX_RECOMMENDATIONS, MAX_WEB_SOURCES, Candidate, DiscoveryError,
+                        DiscoveryResult, Evidence, MusicRequest, ParsedIntent, Recommendation,
+                        SupportedClaim)
 from src.utils import clean_excerpt, normalize, safe_url
 from src.validation import (identity_supported, invalid_response, validate_candidates,
                             validate_parsed_intent, validate_recommendations,
@@ -123,16 +124,21 @@ def _source_says(source: Evidence, candidate: Candidate, intent: ParsedIntent) -
     return text, len(found)
 
 
-def _source_identified(candidates, evidence, intent, skip=frozenset()):
-    """Return the songs a source names, each showing what that source says about it.
+def _source_identified(candidates, evidence, intent, skip=frozenset(), limit=MAX_RECOMMENDATIONS,
+                       require_fit=False):
+    """Return up to ``limit`` songs a source names, each showing what that source says about it.
 
     Songs whose source text mentions more of the requested traits come first. A song whose
-    normalized (title, artist) is in ``skip`` is left out.
+    normalized (title, artist) is in ``skip`` is left out. With ``require_fit``, a song the model
+    judged merely named, not tied to the request by its evidence, is left out too, so a request for
+    rock is not padded with songs a generic "best songs of all time" list happens to name.
     """
     by_id = {item.id: item for item in evidence}
     ranked = []
     for index, candidate in enumerate(candidates):
         if (normalize(candidate.title), normalize(candidate.artist)) in skip:
+            continue
+        if require_fit and not candidate.fits_request:
             continue
         source = next((by_id[source_id] for source_id in candidate.source_ids
                        if source_id in by_id and identity_supported(candidate, by_id[source_id])), None)
@@ -148,7 +154,7 @@ def _source_identified(candidates, evidence, intent, skip=frozenset()):
             ["We couldn't check this song's fit against the source."],
             [SupportedClaim("The source identifies this song and artist.", source.id, quote)],
         )))
-    return [rec for _, _, rec in sorted(ranked, key=lambda row: row[:2])[:5]]
+    return [rec for _, _, rec in sorted(ranked, key=lambda row: row[:2])[:limit]]
 
 
 def _fallback_recommendations(candidates, evidence, intent):
@@ -220,7 +226,7 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
         "intent", lambda feedback=None: validate_parsed_intent(request, analyze(request)),
         lambda: _fallback_intent(request),
         INTENT_FALLBACK_NOTICE)
-    evidence = list(search(request, intent))[:12]
+    evidence = list(search(request, intent))[:MAX_WEB_SOURCES]
     if request.enhanced and documents:
         try:
             evidence.extend(documents(request, intent))
@@ -259,6 +265,7 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
         raise invalid_response()
     judged = set()  # candidates the model returned a verdict row for, whether or not it held up
     contradicted = set()  # candidates whose verdict says they break a hard criterion
+    disfavored = set()  # candidates whose verdict says a source contradicts a soft preference
 
     def record_verdicts(generated):
         """Remember which candidates the model judged, and which of them break a hard criterion."""
@@ -267,6 +274,8 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
             judged.add(key)
             if any(check.status == "contradicted" for check in rec.constraint_checks):
                 contradicted.add(key)
+            if any(check.status == "contradicted" for check in rec.preference_checks):
+                disfavored.add(key)
 
     def generate_checked(feedback=None):
         """Generate recommendations, optionally with repair feedback, and validate them against the evidence."""
@@ -297,6 +306,18 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
         except DiscoveryError as error:
             logger.warning("generation_follow_up_failed code=%s", error.code)
             warnings.append("Some candidates could not be checked against your request.")
+    if not intent.hard_criteria and len(recommendations) < MAX_RECOMMENDATIONS:
+        # A broad request ("rock") has dozens of valid answers, but the model only judges a few
+        # candidates and strict checks drop some of those. The other songs the sources name are still
+        # real answers, so fill the list with them, after the checked songs and without a score. A
+        # request with hard criteria never does this: a song cannot be offered as meeting a
+        # requirement nothing established.
+        shown = {(normalize(rec.title), normalize(rec.artist)) for rec in recommendations}
+        extra = _source_identified(candidates, evidence, intent, skip=shown | contradicted | disfavored,
+                                   limit=MAX_RECOMMENDATIONS - len(recommendations), require_fit=True)
+        if extra:
+            logger.info("results_topped_up checked=%d added=%d", len(recommendations), len(extra))
+            recommendations = recommendations + extra
     unverified = []
     if not recommendations and intent.hard_criteria:
         # Nothing could be confirmed to meet every requirement. Rather than show nothing, list the

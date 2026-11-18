@@ -137,13 +137,14 @@ STYLE = """
 .mode-heading strong {
     display: block; font-size: 1.45rem; margin-top: 0.2rem;
 }
+/* Starts level with the Discover music card (below its heading) and matches its height. */
 .choice-divider {
-    min-height: 27rem; display: flex; flex-direction: column; align-items: center;
+    min-height: 22.1rem; margin-top: 5.1rem; display: flex; flex-direction: column; align-items: center;
     justify-content: center; gap: 0.8rem; color: var(--music-muted); font-size: 0.7rem;
     font-weight: 800; letter-spacing: 0.12em;
 }
 .choice-divider::before, .choice-divider::after {
-    content: ""; width: 1px; height: 5.5rem;
+    content: ""; width: 1px; flex: 1 1 0;
     background: linear-gradient(transparent, color-mix(in srgb, var(--music-wash) 20%, transparent), transparent);
 }
 .choice-divider span {
@@ -281,7 +282,7 @@ STYLE = """
     .stApp :is([class*="st-key-song_card_"], [class*="st-key-catalog_song_card_"]) { padding: 1rem; }
     .catalog-summary-head { align-items: flex-start; flex-direction: column; }
     .choice-divider { min-height: auto; flex-direction: row; margin: 0.5rem 0 1.5rem; }
-    .choice-divider::before, .choice-divider::after { width: 5.5rem; height: 1px; }
+    .choice-divider::before, .choice-divider::after { width: 5.5rem; height: 1px; flex: none; }
 }
 @media (prefers-contrast: more) {
     .stApp :is([class*="st-key-song_card_"], [class*="st-key-catalog_song_card_"]) { border-color: currentColor; box-shadow: none; }
@@ -419,8 +420,8 @@ def catalog_fallback_picks(intent) -> list:
 
 def show_catalog_fallback(picks) -> None:
     """Show the catalog songs found for a request discovery could not verify on the web."""
-    st.caption("We could not verify a web recommendation, so here are songs from the local CSV catalog.")
-    section_heading("results-heading", "Backup picks", "From the catalog")
+    st.caption("We could not verify a web recommendation, so here are songs from our local collection.")
+    section_heading("results-heading", "Backup picks", "From our collection")
     for start in range(0, len(picks), 3):
         columns = st.columns(3, gap="medium")
         for offset, (song, match, fractions, reasons) in enumerate(picks[start:start + 3]):
@@ -442,7 +443,7 @@ def show_catalog_fallback_card(song, match, fractions, reasons, rank) -> None:
     ]
     matched_traits = list(dict.fromkeys(matched_traits))
     with st.container(border=True, key=f"song_card_catalog_fallback_{rank}"):
-        st.caption(f"CATALOG FALLBACK {rank:02}  ·  {match:.0%} MATCH SCORE")
+        st.caption(f"COLLECTION FALLBACK {rank:02}  ·  {match:.0%} MATCH SCORE")
         st.markdown(
             f'<div class="song-identity"><div class="song-title">{escape(song["title"])}</div>'
             f'<div class="song-artist">{escape(song["artist"])}</div></div>',
@@ -794,6 +795,10 @@ def show_result(result):
             caption = "Here are the closest matches we found. Some details may vary by recording."
         else:
             caption = "Here are a few matches to explore."
+        if caption and not unverified and any(not getattr(rec, "fit_score", None) for rec in recommendations) \
+                and any(getattr(rec, "fit_score", None) for rec in recommendations):
+            # Checked songs come first; the rest were only named by their sources.
+            caption += " Songs marked NOT SCORED were named by their sources; we couldn’t check their fit."
         if caption:
             st.caption(caption)
         section_heading("results-heading", *(("Not verified", "Songs to check") if unverified
@@ -917,8 +922,7 @@ def main():
     with catalog:
         section_heading("mode-heading", "Use our prepared collection", "Music Collection")
         with st.form("catalog", border=False):
-            st.caption("Choose a genre, mood, and energy level from the catalog. "
-                       "Leave genre or mood blank to rank on the rest.")
+            st.caption("Pick a genre, mood, and energy level. Genre and mood are optional.")
             genre = st.text_input("Preferred genre", placeholder="pop")
             mood = st.text_input("Preferred mood", placeholder="happy")
             energy = st.slider("Target energy", 0.0, 1.0, 0.7)

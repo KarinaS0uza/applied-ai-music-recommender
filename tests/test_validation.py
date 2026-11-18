@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.models import (Candidate, ConstraintCheck, DiscoveryError, Evidence, MusicRequest,
+from src.models import (MAX_CANDIDATES, MAX_JUDGED, MAX_RECOMMENDATIONS, Candidate, ConstraintCheck, DiscoveryError, Evidence, MusicRequest,
                         ParsedIntent, PreferenceCheck, Recommendation, SupportedClaim, TasteCriterion)
 from src.validation import (criterion_key, identity_supported, validate_candidates,
                             validate_parsed_intent, validate_recommendations, validate_request)
@@ -46,9 +46,9 @@ def keep(recommendations, evidence=None, intent=None, candidates=None):
                                     evidence or [web()], intent or ParsedIntent([], ["jazz"]))
 
 
-def supported(constraint=HARD_KEY):
+def supported(constraint=HARD_KEY, source="web_1", quote="instrumental jazz"):
     """Build a supported constraint check."""
-    return ConstraintCheck(constraint, "supported", "web_1", "instrumental jazz")
+    return ConstraintCheck(constraint, "supported", source, quote)
 
 
 def pref_check(status="supported", source="web_1", quote="instrumental jazz", criterion=PREF_KEY):
@@ -192,11 +192,13 @@ def test_duplicate_identities_are_collapsed_ignoring_case_and_punctuation():
     assert validate_candidates([first, again], [PAGE]) == [first]
 
 
-def test_only_the_first_eight_candidates_are_considered():
-    """Only the first eight candidates are considered."""
-    page = web(text=" ".join(f"Song {n} by Artist {n}." for n in range(10)))
-    candidates = [Candidate(f"Song {n}", f"Artist {n}", ["web_1"]) for n in range(10)]
-    assert [c.title for c in validate_candidates(candidates, [page])] == [f"Song {n}" for n in range(8)]
+def test_only_the_first_max_candidates_are_considered():
+    """Only the first MAX_CANDIDATES candidates are considered."""
+    total = MAX_CANDIDATES + 2
+    page = web(text=" ".join(f"Song {n} by Artist {n}." for n in range(total)))
+    candidates = [Candidate(f"Song {n}", f"Artist {n}", ["web_1"]) for n in range(total)]
+    assert ([c.title for c in validate_candidates(candidates, [page])]
+            == [f"Song {n}" for n in range(MAX_CANDIDATES)])
 
 
 @pytest.mark.parametrize("candidate", [
@@ -241,21 +243,16 @@ LONG_CLAIM = [SupportedClaim("Words", "web_1", "w1 w2")]
     (rec(claims=[SupportedClaim("t", "web_1", "?!")]), [web()], None, "exact, verbatim passage"),
     (rec(source_ids=["web_1", "guide_1"], claims=[CLAIM_ON_GUIDE]), [web(), GUIDE], None, "cannot cite a guide source"),
     (rec(), [web()], INTENT_HARD, "constraint_checks needs exactly one check"),
-    (rec(constraint_checks=[supported(), supported()]), [web()], INTENT_HARD, "constraint_checks needs exactly one check"),
-    (rec(constraint_checks=[supported(), ConstraintCheck("genre:jazz:must_have", "unknown", "", "")]),
-     [web()], INTENT_HARD, "constraint_checks needs exactly one check"),
-    (rec(preference_checks=[pref_check(), pref_check()]), [web()], INTENT_PREF, "preference_checks needs exactly one check"),
-    (rec(preference_checks=[pref_check(), PreferenceCheck("mood:happy:preference", "unknown", "", "")]),
-     [web()], INTENT_PREF, "preference_checks needs exactly one check"),
-    (rec(preference_checks=[pref_check(source="web_2")]), TWO_PAGES, INTENT_PREF, f"check {PREF_KEY}:"),
-    (rec(source_ids=["web_1", "mb_1"], preference_checks=[pref_check(source="mb_1", quote="identity metadata")]),
-     [web(), MUSICBRAINZ], INTENT_PREF, f"check {PREF_KEY}:"),
-    (rec(claims=LONG_CLAIM, preference_checks=[pref_check(quote=QUOTE_26)]), [web(text=LONG_TEXT)], INTENT_PREF,
-     f"check {PREF_KEY}:"),
+    (rec(constraint_checks=[supported(constraint="genre:jazz:must_have")]), [web()], INTENT_HARD,
+     "constraint_checks needs exactly one check"),  # a check for another criterion is not this one's
+    (rec(constraint_checks=[supported(source="web_2")]), TWO_PAGES, INTENT_HARD, f"check {HARD_KEY}:"),
+    (rec(source_ids=["web_1", "mb_1"], constraint_checks=[supported(quote="identity metadata", source="mb_1")]),
+     [web(), MUSICBRAINZ], INTENT_HARD, f"check {HARD_KEY}:"),
+    (rec(claims=LONG_CLAIM, constraint_checks=[supported(quote=QUOTE_26)]), [web(text=LONG_TEXT)], INTENT_HARD,
+     f"check {HARD_KEY}:"),
 ], ids=["not-a-candidate", "blank-explanation", "long-explanation", "no-source-ids", "not-the-identifying-source",
         "url-in-explanation", "url-in-uncertainty", "no-claims", "claim-source-not-cited", "claim-quote-too-long",
-        "claim-quote-blank", "claim-on-guide", "constraint-check-missing", "constraint-check-duplicated",
-        "constraint-check-extra", "preference-check-duplicated", "preference-check-extra",
+        "claim-quote-blank", "claim-on-guide", "constraint-check-missing", "constraint-check-for-another-criterion",
         "check-source-not-cited", "check-on-metadata", "check-quote-too-long"])
 def test_rejected_song_comes_back_with_a_fix_the_model_can_act_on(song, evidence, intent, hint):
     """Rejected song comes back with a fix the model can act on."""
@@ -265,22 +262,74 @@ def test_rejected_song_comes_back_with_a_fix_the_model_can_act_on(song, evidence
     assert hint in exc.value.feedback
 
 
-@pytest.mark.parametrize("song,evidence,reason", [
-    (rec(preference_checks=[pref_check(source="web_9")]), [web()], "check_source_unknown"),
-    (rec(preference_checks=[pref_check(source="web_2")]), TWO_PAGES, "check_source_not_cited"),
-    (rec(source_ids=["web_1", "mb_1"], preference_checks=[pref_check(source="mb_1", quote="identity metadata")]),
-     [web(), MUSICBRAINZ], "check_source_not_quotable"),
-    (rec(preference_checks=[pref_check(quote="  ")]), [web()], "check_quote_empty"),
-    (rec(claims=LONG_CLAIM, preference_checks=[pref_check(quote=QUOTE_26)]), [web(text=LONG_TEXT)],
-     "check_quote_too_long"),
-    (rec(preference_checks=[pref_check(quote="mellow lo-fi vibes")]), [web()], "check_quote_not_in_source"),
-], ids=["unknown-source", "source-not-cited", "metadata-source", "empty-quote", "quote-too-long", "quote-not-verbatim"])
-def test_each_way_a_check_quote_can_fail_logs_its_own_reason(song, evidence, reason, caplog):
-    """Each way a check quote can fail is logged with its own reason, with the model-facing hint unchanged."""
+HARD_FAILURES = [
+    (supported(source="web_9"), [web()], "check_source_unknown"),
+    (supported(source="web_2"), TWO_PAGES, "check_source_not_cited"),
+    (supported(source="mb_1", quote="identity metadata"), [web(), MUSICBRAINZ], "check_source_not_quotable"),
+    (supported(quote="  "), [web()], "check_quote_empty"),
+    (supported(quote=QUOTE_26), [web(text=LONG_TEXT)], "check_quote_too_long"),
+    (supported(quote="mellow lo-fi vibes"), [web()], "check_quote_not_in_source"),
+]
+FAILURE_IDS = ["unknown-source", "source-not-cited", "metadata-source", "empty-quote", "quote-too-long",
+               "quote-not-verbatim"]
+
+
+def song_citing(check, evidence):
+    """Build a song whose only check is the given one, citing both pages when the evidence has them."""
+    sources = ["web_1", "mb_1"] if check.source_id == "mb_1" else ["web_1"]
+    return rec(source_ids=sources, claims=LONG_CLAIM if check.quote == QUOTE_26 else [CLAIM],
+               constraint_checks=[check])
+
+
+@pytest.mark.parametrize("check,evidence,reason", HARD_FAILURES, ids=FAILURE_IDS)
+def test_each_way_a_hard_check_quote_can_fail_logs_its_own_reason(check, evidence, reason, caplog):
+    """A hard criterion's bad quote still rejects the song, logged with its own reason and the shared hint."""
     with caplog.at_level("INFO", logger="src.validation"), pytest.raises(DiscoveryError) as exc:
-        keep([song], evidence, INTENT_PREF)
+        keep([song_citing(check, evidence)], evidence, INTENT_HARD)
     assert f"recommendation_rejected reason={reason} position=0" in caplog.text
-    assert f"check {PREF_KEY}: the quote must be an exact, verbatim passage" in exc.value.feedback
+    assert f"check {HARD_KEY}: the quote must be an exact, verbatim passage" in exc.value.feedback
+
+
+@pytest.mark.parametrize("check,evidence,reason", [
+    (pref_check(source="web_9"), [web()], "check_source_unknown"),
+    (pref_check(source="web_2"), TWO_PAGES, "check_source_not_cited"),
+    (pref_check(quote="  "), [web()], "check_quote_empty"),
+    (pref_check(quote="mellow lo-fi vibes"), [web()], "check_quote_not_in_source"),
+], ids=["unknown-source", "source-not-cited", "empty-quote", "quote-not-verbatim"])
+def test_a_preference_check_that_does_not_hold_up_is_downgraded_to_unknown_not_rejected(
+        check, evidence, reason, caplog):
+    """A soft preference with a bad quote costs only that check: it becomes unknown and the song survives."""
+    other = PreferenceCheck("mood:happy:preference", "supported", "web_1", "instrumental jazz")
+    intent = ParsedIntent([PREF, TasteCriterion("mood", "preference", "happy", 1, "happy")], ["q"])
+    with caplog.at_level("INFO", logger="src.validation"):
+        kept = keep([rec(preference_checks=[check, other])], evidence, intent)
+    assert f"preference_check_repaired reason={reason}" in caplog.text
+    assert [(c.criterion, c.status, c.source_id, c.quote) for c in kept[0].preference_checks] == [
+        (PREF_KEY, "unknown", "", ""), ("mood:happy:preference", "supported", "web_1", "instrumental jazz")]
+    assert kept[0].fit_score == pytest.approx(1 / 3)  # only the weight-1 preference still counts
+
+
+def test_a_song_whose_only_preference_check_fails_is_excluded_not_scored():
+    """When the repair leaves no supported preference the song is quietly excluded, like any non-match."""
+    assert keep([rec(preference_checks=[pref_check(quote="mellow lo-fi vibes")])], intent=INTENT_PREF) == []
+
+
+def test_extra_repeated_and_missing_checks_are_repaired_not_rejected():
+    """Noise in the check lists no longer costs the song: extras and repeats are dropped, gaps are unknown."""
+    noisy = rec(constraint_checks=[supported(), supported(),
+                                   ConstraintCheck("genre:jazz:must_have", "supported", "web_1", "jazz")],
+                preference_checks=[pref_check(), pref_check(status="unknown", quote="", source=""),
+                                   PreferenceCheck("mood:happy:preference", "supported", "web_1", "jazz")])
+    kept = keep([noisy], intent=ParsedIntent([HARD, PREF, TasteCriterion("era", "preference", "1950s", 1, "x")], ["q"]))
+    assert [c.constraint for c in kept[0].constraint_checks] == [HARD_KEY]
+    assert [(c.criterion, c.status) for c in kept[0].preference_checks] == [
+        (PREF_KEY, "supported"), ("era:1950s:preference", "unknown")]
+
+
+def test_a_request_without_hard_criteria_ignores_constraint_checks_the_model_made_up():
+    """The common failure: nothing was required, yet the model returned a constraint check anyway."""
+    kept = keep([rec(constraint_checks=[supported()])])
+    assert len(kept) == 1 and kept[0].constraint_checks == []
 
 
 # --- validate_recommendations: what is accepted --------------------------------------------
@@ -372,11 +421,20 @@ def test_a_quietly_excluded_song_does_not_hide_a_rejected_one():
     assert "So What by Miles Davis" in exc.value.feedback and "Take Five" not in exc.value.feedback
 
 
-def test_only_the_first_eight_recommendations_are_considered():
-    """Only the first eight recommendations are considered."""
-    nonsense = [rec(title=f"Invented {n}", artist="Nobody") for n in range(8)]
-    with pytest.raises(DiscoveryError):  # the valid ninth song is never reached
+def test_only_the_first_max_judged_recommendations_are_considered():
+    """Only the first MAX_JUDGED recommendations are considered."""
+    nonsense = [rec(title=f"Invented {n}", artist="Nobody") for n in range(MAX_JUDGED)]
+    with pytest.raises(DiscoveryError):  # the valid song after them is never reached
         keep(nonsense + [rec()])
+
+
+def test_at_most_max_recommendations_are_returned():
+    """Passing songs beyond the display cap are dropped, best first."""
+    page = web(text="Instrumental jazz. " + " ".join(f"Song {n} by Artist {n}." for n in range(MAX_RECOMMENDATIONS + 1)))
+    songs = [rec(title=f"Song {n}", artist=f"Artist {n}") for n in range(MAX_RECOMMENDATIONS + 1)]
+    candidates = [Candidate(f"Song {n}", f"Artist {n}", ["web_1"]) for n in range(MAX_RECOMMENDATIONS + 1)]
+    kept = keep(songs, [page], candidates=candidates)
+    assert [r.title for r in kept] == [f"Song {n}" for n in range(MAX_RECOMMENDATIONS)]
 
 
 # --- control characters in names -------------------------------------------------------------

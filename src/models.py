@@ -28,6 +28,14 @@ INTENT_FACETS = {"genre", "mood", "energy", "instrument", "vocals", "language",
 CRITERION_KINDS = {"must_have", "must_avoid", "preference"}
 CHECK_STATUSES = {"supported", "partial", "unknown", "contradicted"}
 
+# How many songs each discovery stage may carry. A broad request such as "rock" should still fill a
+# few rows of cards, so these are wider than one row: web pages -> candidates -> songs the model
+# judges -> songs shown (three columns of cards, so a multiple of three).
+MAX_WEB_SOURCES = 16
+MAX_CANDIDATES = 30
+MAX_JUDGED = 10
+MAX_RECOMMENDATIONS = 9
+
 
 @dataclass(frozen=True)
 class TasteCriterion:
@@ -69,10 +77,15 @@ class Evidence:
 
 @dataclass(frozen=True)
 class Candidate:
-    """A song and artist pair identified by the sources."""
+    """A song and artist pair identified by the sources.
+
+    ``fits_request`` is the model's judgment, made while extracting, of whether the cited evidence ties
+    the song to what was asked for (say, the requested genre) rather than merely naming it.
+    """
     title: str
     artist: str
     source_ids: list[str]
+    fits_request: bool = True
 
 
 @dataclass(frozen=True)

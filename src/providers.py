@@ -19,8 +19,8 @@ from uuid import UUID
 
 import requests
 
-from src.models import (Candidate, ConstraintCheck, DiscoveryError, Evidence,
-                        MusicRequest, ParsedIntent, PreferenceCheck, Recommendation,
+from src.models import (MAX_CANDIDATES, MAX_JUDGED, MAX_WEB_SOURCES, Candidate, ConstraintCheck,
+                        DiscoveryError, Evidence, MusicRequest, ParsedIntent, PreferenceCheck, Recommendation,
                         SupportedClaim, TasteCriterion, TrackLink, VideoLink)
 from src.utils import normalize, safe_url
 from src.validation import criterion_key, validate_parsed_intent
@@ -205,7 +205,7 @@ class TavilyProvider:
             hit = data is not None
             started = time.monotonic()
             if not hit:
-                payload = {"query": query, "search_depth": "basic", "max_results": 6,
+                payload = {"query": query, "search_depth": "basic", "max_results": 10,
                            "include_answer": False, "include_raw_content": False,
                            "auto_parameters": False}
                 if domains:
@@ -231,7 +231,7 @@ class TavilyProvider:
                         logger.warning("retrieval_degraded provider=Tavily mode=music code=%s", error.code)
                         continue
                     raise error
-                data = {"results": data["results"][:6], "retrieved_at": datetime.now(timezone.utc).isoformat()}
+                data = {"results": data["results"][:10], "retrieved_at": datetime.now(timezone.utc).isoformat()}
                 self.cache.put(key, data)
             for item in data["results"]:
                 if not isinstance(item, dict):
@@ -264,7 +264,7 @@ class TavilyProvider:
         ))
         return [Evidence(f"web_{index}", "web", item["title"], item["text"], item["url"],
                          item["retrieved_at"])
-                for index, item in enumerate(collected[:12], 1)]
+                for index, item in enumerate(collected[:MAX_WEB_SOURCES], 1)]
 
 
 def _is_music_source(url: str, domains=MUSIC_SOURCE_DOMAINS) -> bool:
@@ -310,11 +310,12 @@ _INTENT_SCHEMA = object_schema({
         "source_text": _STRING})},
     "search_queries": {"type": "array", "minItems": 1, "maxItems": 2, "items": _STRING},
 })
-_CANDIDATE_SCHEMA = object_schema({"candidates": {"type": "array", "maxItems": 8,
+_CANDIDATE_SCHEMA = object_schema({"candidates": {"type": "array", "maxItems": MAX_CANDIDATES,
     "items": object_schema({"title": _STRING, "artist": _STRING,
         "entity_type": {"type": "string", "enum": ["song", "not_song"]},
+        "fits_request": {"type": "boolean"},
         "source_ids": _STRINGS})}})
-_RECOMMENDATION_SCHEMA = object_schema({"recommendations": {"type": "array", "maxItems": 8,
+_RECOMMENDATION_SCHEMA = object_schema({"recommendations": {"type": "array", "maxItems": MAX_JUDGED,
     "items": object_schema({"title": _STRING, "artist": _STRING, "explanation": _STRING,
         "source_ids": _STRINGS, "uncertainties": _STRINGS,
         "claims": {"type": "array", "items": object_schema({"text": _STRING, "source_id": _STRING, "quote": _STRING})},
@@ -473,7 +474,7 @@ class GeminiProvider:
         """Close the underlying Gemini client."""
         self.client.close()
 
-    def _json(self, task, payload, schema):
+    def _json(self, task, payload, schema, max_tokens=4096):
         """Send one task to Gemini and return its JSON answer, enforcing the per-request call limit."""
         if self.calls >= 4:
             raise DiscoveryError("request_limit", "The generation limit for this request was reached.")
@@ -482,7 +483,7 @@ class GeminiProvider:
         request = dict(model=self.model,
             contents=json.dumps({"task": task, "data": payload}, ensure_ascii=False),
             config={"system_instruction": _SYSTEM, "temperature": 0,
-                    "max_output_tokens": 4096, "response_mime_type": "application/json",
+                    "max_output_tokens": max_tokens, "response_mime_type": "application/json",
                     "response_json_schema": schema,
                     "automatic_function_calling": {"disable": True}})
         try:
@@ -526,8 +527,8 @@ increase weight. source_text must be a short verbatim substring of the request o
 infer a closely entailed preference, such as low energy from very peaceful, but its source_text must
 still quote the user's words. Produce one or two concise music-search queries without filler such as
 'I want', and add helpful synonyms while preserving all hard criteria. Phrase each query to find
-pages that name and describe specific songs or artists, such as 'best ... songs', 'top ... artists'
-or 'recommended ... albums'. Avoid words that mostly return streams, mixes, playlists or radio
+list pages that name many specific songs, such as 'best ... songs of all time', 'essential ... songs'
+or 'top ... songs'. Do not ask for artists or albums: those pages name few songs. Avoid words that mostly return streams, mixes, playlists or radio
 channels, such as 'beats', 'mix', 'playlist', 'radio', '24/7' or 'to study to'. Never include URLs.""",
             {"request": asdict(request)}, _INTENT_SCHEMA)
         try:
@@ -552,18 +553,21 @@ channels, such as 'beats', 'mix', 'playlist', 'radio', '24/7' or 'to study to'. 
 
     def extract_candidates(self, request, intent, evidence):
         """Ask Gemini for song and artist pairs that the evidence names together."""
-        data = self._json("""Extract up to 8 relevant real song/artist pairs explicitly named together in
+        data = self._json("""Extract up to 30 relevant real song/artist pairs explicitly named together in
 web or song_card evidence. Cite only sources establishing that identity. Do not turn a work's composer
 into its performer; if no performer is established, skip the candidate. A reference is context, not
 evidence for new facts. Do not return albums, playlists, applications, labels or recording studios as
-songs. Mark those entity_type not_song. Prefer identities from evidence that overlaps the analyzed intent.
+songs. Mark those entity_type not_song. Prefer identities from evidence that overlaps the analyzed intent. For each song set fits_request: true
+only when the cited evidence ties it to what the request asks for (for example the genre or mood the
+listener named), and false when the evidence merely names it, such as in a generic list that is not about
+that request. Judge from the evidence, not from memory. Return as many fitting songs as the evidence supports.
 When two sources are equally relevant, prefer the music-specialist source. A specialist domain alone is
 not proof that a song identity or characteristic is correct.""",
             {"request": asdict(request), "intent": asdict(intent),
              "evidence": [asdict(e) for e in evidence]}, _CANDIDATE_SCHEMA)
         try:
             rows = data["candidates"]
-            if not isinstance(rows, list) or len(rows) > 8:
+            if not isinstance(rows, list) or len(rows) > MAX_CANDIDATES:
                 raise ValueError()
             result = []
             for row in rows:
@@ -573,7 +577,10 @@ not proof that a song identity or characteristic is correct.""",
                 if row["entity_type"] not in {"song", "not_song"}:
                     raise ValueError()
                 if row["entity_type"] == "song":
-                    result.append(Candidate(title, artist, source_ids))
+                    fits = row.get("fits_request", True)
+                    if not isinstance(fits, bool):
+                        raise ValueError()
+                    result.append(Candidate(title, artist, source_ids, fits))
             return result
         except (KeyError, TypeError, ValueError):
             raise DiscoveryError("invalid_response", "Gemini returned invalid candidate evidence.") from None
@@ -583,7 +590,7 @@ not proof that a song identity or characteristic is correct.""",
         criteria = [{"id": criterion_key(criterion), **asdict(criterion)} for criterion in intent.criteria]
         payload = {"request": asdict(request), "criteria": criteria,
                    "candidates": [asdict(c) for c in candidates], "evidence": [asdict(e) for e in evidence]}
-        task = """Evaluate up to eight supplied candidates using only the evidence. Return the
+        task = """Evaluate up to ten supplied candidates using only the evidence. Return the
 best evidence-backed candidates, including partial preference matches so application code can rank them.
 Explain fit in concise prose using only cited facts, and name unknown requested traits in uncertainties.
 Each factual assertion needs a claims entry with a short verbatim supporting quote of at most 25 words.
@@ -599,10 +606,10 @@ match a confirmed version. Do not add candidates from model memory."""
             payload["validation_feedback"] = feedback[:1500]
             task = ("Your previous answer was rejected. Fix every problem listed in validation_feedback, keep "
                     "what was valid, and return a complete corrected answer.\n") + task
-        data = self._json(task, payload, _RECOMMENDATION_SCHEMA)
+        data = self._json(task, payload, _RECOMMENDATION_SCHEMA, max_tokens=8192)
         try:
             rows = data["recommendations"]
-            if not isinstance(rows, list) or len(rows) > 8:
+            if not isinstance(rows, list) or len(rows) > MAX_JUDGED:
                 raise ValueError()
         except (KeyError, TypeError, ValueError):
             raise DiscoveryError("invalid_response", "Gemini returned invalid recommendations.") from None

@@ -5,7 +5,7 @@
 A retrieval-augmented music discovery assistant. Describe what you want to hear:
 a mood, genre, language, instrument, activity or vocal preference, optionally with
 a reference song. The system retrieves evidence from the web, from a prepared music
-guide and song cards, and from MusicBrainz. Gemini selects up to five songs from
+guide and song cards, and from MusicBrainz. Gemini selects up to nine songs from
 that evidence, and Python validates every citation before anything is shown. Each
 result comes with an explanation, the traits that could not be confirmed, and
 links to its sources.
@@ -53,14 +53,14 @@ flowchart TD
     Extract --> Generate["Gemini: evidence-grounded selection"]
     Metadata --> Generate
     Generate --> Validate["Validate evidence and score weighted preferences"]
-    Validate --> Results["Up to five exact or partial matches with uncertainties"]
+    Validate --> Results["Up to nine exact or partial matches with uncertainties"]
     Results --> Human["Listener reviews excerpts and original sources"]
     Checks["pytest: controlled pipeline, provider and UI checks"] -.-> Validate
     Review["Recorded six-request retrieval comparison"] -.-> Docs
 
     Validate -->|"Invalid model output"| Degrade["Retry once, then warn and keep only source-identified songs"]
     Degrade --> Results
-    Results -->|"No supported match"| Fallback["Up to five CSV catalog songs, else unverified songs, else a related video, else a plain message"]
+    Results -->|"No supported match"| Fallback["Up to five collection songs, else unverified songs, else a related video, else a plain message"]
     Fallback --> Human
     Guard["Input checks, call limits, timeouts, safe errors"] -.-> RAG
 ```
@@ -234,23 +234,31 @@ never switches to a paid model or advanced Tavily search on its own.
    not displace a full four-card lexical result. Named references and requested
    languages retain priority, guides remain lexical, and any embedding failure
    returns the exact lexical result.
-4. A second Gemini call extracts up to eight song candidates with source IDs,
+4. A second Gemini call extracts up to twenty song candidates with source IDs,
    excluding albums, playlists and other non-song entities. A candidate must be
    named in its cited web or song-card evidence.
 5. Enhanced retrieval looks up at most five candidates in MusicBrainz. Exact
    title and artist matches keep recording IDs, release details and version
    ambiguity. Metadata does not establish mood, vocal quality or musical fit.
-6. A third Gemini call evaluates hard criteria and soft preferences for up to eight
+6. A third Gemini call evaluates hard criteria and soft preferences for up to ten
    candidates. Python computes a weighted fit score (the share of weighted
    preferences that are supported, with partial matches counting half) and returns
-   the five strongest supported or partial matches. The model is asked for its best
+   the nine strongest supported or partial matches. The model is asked for its best
    candidates and may judge only some. If it judged some but none survived
    validation, one follow-up call asks about the candidates it skipped, using the
    request's single shared retry.
 7. Validation rejects unknown sources, unsupported identity references, missing
    or paraphrased supporting excerpts, cross-song citations, unsafe URLs and
    unestablished hard-constraint checks. Duplicates are removed, and soft
-   preferences never relax an explicit requirement or exclusion.
+   preferences never relax an explicit requirement or exclusion. Noise in the
+   check lists is repaired rather than fatal: extra or repeated checks are dropped,
+   and a soft-preference check that is missing or whose quote does not hold up
+   counts as "unknown" (it can only lower a score, never raise it).
+8. A broad request ("rock") has many valid answers but the model judges only a few.
+   When the request has no hard criteria and fewer than nine songs survived, the list
+   is topped up, after the checked songs, with the other songs the sources name (no
+   extra model call). They carry no score, are labeled "NOT SCORED", and a song whose
+   checks found a source contradicting a preference is never added.
 
 The full description and reference reach all three model calls, and retrieved text
 is treated as untrusted data. Because the generator sees different evidence for
@@ -273,7 +281,7 @@ mentions more of the requested traits are listed first. This is word matching wi
 simple stemming and a few synonyms ("happy" also finds "upbeat"), so a mention is
 not proof that the song fits. A warning explains what happened. When no supported
 match remains, or discovery fails outright, the Streamlit app falls back in order to:
-up to five songs ranked from the CSV catalog (labeled "CATALOG FALLBACK", each with a
+up to five songs ranked from the CSV catalog (labeled "COLLECTION FALLBACK", each with a
 match score, a "Why it fits" line and platform links); songs a source names but no
 check could verify (only when the request had hard requirements, labeled "NOT
 VERIFIED"); a related YouTube video from the retrieved sources; and finally a plain

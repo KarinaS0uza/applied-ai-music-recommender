@@ -489,6 +489,7 @@ without checking the cited source.
   things, and even one exact MusicBrainz title and artist match does not prove the
   intended version.
 - **Unscored fallback listings.** When the model's fit checks fail validation twice,
+  or a broad request with no hard requirements leaves fewer than nine checked songs,
   the app lists songs that a retrieved page names, marked "NOT SCORED". Each shows a
   window of that page's own text near the song's title and notes which requested
   traits the text mentions. Detection is word matching with crude stemming and a few

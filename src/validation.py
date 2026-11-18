@@ -6,9 +6,9 @@ from dataclasses import replace
 import logging
 import re
 
-from src.models import (CHECK_STATUSES, CRITERION_KINDS, INTENT_FACETS, Candidate,
-                        DiscoveryError, Evidence, MusicRequest, ParsedIntent,
-                        TasteCriterion)
+from src.models import (CHECK_STATUSES, CRITERION_KINDS, INTENT_FACETS, MAX_CANDIDATES,
+                        MAX_JUDGED, MAX_RECOMMENDATIONS, Candidate, DiscoveryError, Evidence,
+                        MusicRequest, ParsedIntent, PreferenceCheck, TasteCriterion)
 from src.utils import clean_text, normalize, safe_url
 
 logger = logging.getLogger(__name__)
@@ -86,7 +86,7 @@ def validate_candidates(candidates: list[Candidate], evidence: list[Evidence]) -
     """Keep candidates whose identity is supported by their cited sources, dropping the rest."""
     by_id = {e.id: e for e in evidence}
     valid, seen = [], set()
-    for candidate in candidates[:8]:
+    for candidate in candidates[:MAX_CANDIDATES]:
         candidate = replace(candidate, title=clean_text(candidate.title), artist=clean_text(candidate.artist))
         key = (normalize(candidate.title), normalize(candidate.artist))
         if not all(key) or len(candidate.title) > 200 or len(candidate.artist) > 200:
@@ -133,6 +133,17 @@ def _validate_evidence_check(status, source_id, quote, rec, by_id, label):
                     "with an empty source_id and quote")
 
 
+def _first_check_per_key(checks, field, expected):
+    """Keep the first check for each expected key, dropping repeats and keys nobody asked about."""
+    kept, seen = [], set()
+    for check in checks:
+        key = getattr(check, field)
+        if key in expected and key not in seen:
+            seen.add(key)
+            kept.append(check)
+    return kept
+
+
 def _check_recommendation(rec, allowed, by_id, hard, preferences):
     """Return (fit_score, rec), None when the song is legitimately excluded, or raise _Rejected."""
     key = (normalize(rec.title), normalize(rec.artist))
@@ -169,29 +180,36 @@ def _check_recommendation(rec, allowed, by_id, hard, preferences):
                             f"{claim.source_id}; do not paraphrase or join separate passages")
         if by_id[claim.source_id].kind == "guide":
             raise _Rejected("claim_on_guide", "claims cannot cite a guide source")
-    if ([check.constraint for check in rec.constraint_checks] != list(dict.fromkeys(
-            check.constraint for check in rec.constraint_checks))
-            or {check.constraint for check in rec.constraint_checks} != set(hard)):
+    # Extra or repeated checks are harmless noise (a request with no hard criteria should have none,
+    # yet the model often fills the list anyway), so they are dropped rather than costing the song.
+    # A check that is missing for a hard criterion is still rejected: nothing then speaks for it.
+    constraint_checks = _first_check_per_key(rec.constraint_checks, "constraint", hard)
+    if {check.constraint for check in constraint_checks} != set(hard):
         raise _Rejected("constraint_checks_mismatch",
                         f"constraint_checks needs exactly one check for each of {sorted(hard)}")
     hard_failed = False
-    for check in rec.constraint_checks:
+    for check in constraint_checks:
         _validate_evidence_check(check.status, check.source_id, check.quote, rec, by_id, check.constraint)
         if check.status != "supported":
             hard_failed = True
     if hard_failed:
         logger.info("recommendation_rejected reason=hard_criterion_unestablished")
         return None
-    if ([check.criterion for check in rec.preference_checks] != list(dict.fromkeys(
-            check.criterion for check in rec.preference_checks))
-            or {check.criterion for check in rec.preference_checks} != set(preferences)):
-        raise _Rejected("preference_checks_mismatch",
-                        f"preference_checks needs exactly one check for each of {sorted(preferences)}")
+    # A soft preference can only be downgraded, never upgraded, by repair: a check that is missing, or
+    # whose quote does not hold up, counts as "unknown", which scores nothing and claims nothing.
+    preference_checks = _first_check_per_key(rec.preference_checks, "criterion", preferences)
+    present = {check.criterion for check in preference_checks}
+    preference_checks += [PreferenceCheck(key, "unknown", "", "") for key in preferences
+                          if key not in present]
     matched = False
     weighted_fit = 0.0
     total_weight = sum(c.weight for c in preferences.values())
-    for check in rec.preference_checks:
-        _validate_evidence_check(check.status, check.source_id, check.quote, rec, by_id, check.criterion)
+    for index, check in enumerate(preference_checks):
+        try:
+            _validate_evidence_check(check.status, check.source_id, check.quote, rec, by_id, check.criterion)
+        except _Rejected as failure:
+            logger.info("preference_check_repaired reason=%s", failure.reason)
+            check = preference_checks[index] = PreferenceCheck(check.criterion, "unknown", "", "")
         if check.status in {"supported", "partial"}:
             matched = True
         factor = 1.0 if check.status == "supported" else 0.5 if check.status == "partial" else 0.0
@@ -201,6 +219,7 @@ def _check_recommendation(rec, allowed, by_id, hard, preferences):
         return None
     fit_score = weighted_fit / total_weight if total_weight else 1.0
     return fit_score, replace(rec, title=clean_text(rec.title), artist=clean_text(rec.artist),
+                              constraint_checks=constraint_checks, preference_checks=preference_checks,
                               fit_score=fit_score)
 
 
@@ -215,7 +234,7 @@ def validate_recommendations(recommendations, candidates, evidence, intent):
     hard = {criterion_key(c): c for c in intent.hard_criteria}
     preferences = {criterion_key(c): c for c in intent.preferences}
     scored, rejected = [], []
-    for position, rec in enumerate(recommendations[:8]):
+    for position, rec in enumerate(recommendations[:MAX_JUDGED]):
         try:
             outcome = _check_recommendation(rec, allowed, by_id, hard, preferences)
         except _Rejected as failure:
@@ -235,6 +254,6 @@ def validate_recommendations(recommendations, candidates, evidence, intent):
         if key not in seen:
             seen.add(key)
             valid.append(rec)
-        if len(valid) == 5:
+        if len(valid) == MAX_RECOMMENDATIONS:
             break
     return valid

@@ -20,13 +20,13 @@ flowchart TD
     Extract --> Generate["Gemini: evidence-grounded selection"]
     Metadata --> Generate
     Generate --> Validate["Validate evidence and score weighted preferences"]
-    Validate --> Results["Up to five exact or partial matches with uncertainties"]
+    Validate --> Results["Up to nine exact or partial matches with uncertainties"]
     Results --> Human["Listener reviews excerpts and original sources"]
     Checks["pytest: controlled pipeline, provider and UI checks"] -.-> Validate
     Review["Recorded six-request retrieval comparison"] -.-> Docs
 
     Validate -->|"Invalid model output"| Degrade["Retry once, then warn and keep only source-identified songs"]
     Degrade --> Results
-    Results -->|"No supported match"| Fallback["Up to five CSV catalog songs, else unverified songs, else a related video, else a plain message"]
+    Results -->|"No supported match"| Fallback["Up to five collection songs, else unverified songs, else a related video, else a plain message"]
     Fallback --> Human
     Guard["Input checks, call limits, timeouts, safe errors"] -.-> RAG

@@ -72,6 +72,22 @@ def test_song_card_shows_the_matched_video_with_markup_neutralized(app):
     assert not app.exception
 
 
+def test_a_mix_of_scored_and_unscored_songs_explains_the_unscored_ones(app):
+    """Topped-up songs follow the checked ones, and the page says what NOT SCORED means."""
+    checked = Recommendation("Take Five", "Dave Brubeck Quartet", "Five-beat jazz.", ["web_1"], [], fit_score=1.0)
+    named = Recommendation("So What", "Miles Davis", "“So What by Miles Davis.”", ["web_1"],
+                           ["We couldn't check this song's fit against the source."])
+    result = DiscoveryResult([checked, named],
+                             [Evidence("web_1", "web", "Source", "Evidence", "https://example.org/music")], [])
+    with patch("src.composition.find_music", return_value=result):
+        submit(app, "jazz")
+    captions = [element.value for element in app.caption]
+    assert any("Here are a few matches to explore." in v and "NOT SCORED were named by their sources" in v
+               for v in captions)
+    assert any("NOT SCORED" in v and v.startswith("DISCOVERY 02") for v in captions)
+    assert not app.exception
+
+
 def test_blank_input_does_not_call_service(app):
     """Blank input does not call service."""
     with patch("src.composition.find_music") as service:
@@ -196,14 +212,14 @@ def test_empty_discovery_recommends_csv_catalog_songs_as_the_first_fallback(app)
 
     visible_copy = [element.value for kind in ("caption", "text", "markdown") for element in app.get(kind)]
     rendered = "\n".join(visible_copy)
-    assert "CATALOG FALLBACK 01" in rendered and "CATALOG FALLBACK 05" in rendered
-    assert "From the catalog" in rendered and "Backup picks" in rendered
+    assert "COLLECTION FALLBACK 01" in rendered and "COLLECTION FALLBACK 05" in rendered
+    assert "From our collection" in rendered and "Backup picks" in rendered
     assert "Sunrise City" in rendered
     assert "Neon Echo" in rendered
     assert "MATCH SCORE" in rendered
     assert "Why it fits" in rendered
     assert re.search(r"Energy similarity \d+%", rendered)
-    assert "songs from the local CSV catalog" in rendered
+    assert "songs from our local collection" in rendered
     assert "RELATED VIDEO" not in rendered  # the catalog comes before the video
     assert not app.exception
 
@@ -236,7 +252,7 @@ def test_empty_discovery_recommends_related_youtube_video_with_friendly_note(app
     assert "No candidate had evidence" not in rendered
     assert not app.warning
     assert any(element.proto.label == "Watch on YouTube" for element in app.get("link_button"))
-    assert "CATALOG FALLBACK" not in rendered
+    assert "COLLECTION FALLBACK" not in rendered
     assert not app.exception
 
 
@@ -821,7 +837,7 @@ def test_a_failing_catalog_fallback_degrades_to_the_plain_message(app):
         submit(app, "happy pop")
     captions = [caption.value for caption in app.caption]
     assert "No evidence-backed matches are available for this request yet." in captions
-    assert not any("CATALOG FALLBACK" in caption for caption in captions) and not app.exception
+    assert not any("COLLECTION FALLBACK" in caption for caption in captions) and not app.exception
 
 
 def test_catalog_summary_names_the_request_and_counts_the_songs(app):
@@ -930,7 +946,7 @@ def test_catalog_songs_replace_unverified_songs_when_the_catalog_works(app):
     with patch("src.composition.find_music", return_value=result):
         submit(app, "clean singing metal")
     captions = [caption.value for caption in app.caption]
-    assert any("CATALOG FALLBACK 01" in caption for caption in captions)
+    assert any("COLLECTION FALLBACK 01" in caption for caption in captions)
     assert not any("NOT VERIFIED" in caption for caption in captions)
     assert "Du Hast" not in html_of(app) and not app.warning and not app.exception
 
@@ -943,7 +959,7 @@ def test_a_failed_discovery_falls_back_to_catalog_songs(app):
         app.button[0].click().run()
     assert [error.value for error in app.error] == ["Quota reached. Try later."]
     captions = [caption.value for caption in app.caption]
-    assert any("CATALOG FALLBACK 01" in caption for caption in captions)
+    assert any("COLLECTION FALLBACK 01" in caption for caption in captions)
     assert not app.exception
 
 
@@ -952,7 +968,7 @@ def test_invalid_input_does_not_trigger_the_catalog_fallback(app):
     app.run()
     app.text_area[0].set_value("   ")
     app.button[0].click().run()
-    assert not any("CATALOG FALLBACK" in caption.value for caption in app.caption)
+    assert not any("COLLECTION FALLBACK" in caption.value for caption in app.caption)
     assert not app.exception
 
 

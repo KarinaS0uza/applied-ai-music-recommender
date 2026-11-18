@@ -11,7 +11,8 @@ import pytest
 from src.providers import Settings
 from src.composition import find_music
 from src.discovery import _requirement_label, discover_music
-from src.models import (Candidate, ConstraintCheck, DiscoveryError, Evidence,
+from src.models import (MAX_JUDGED, MAX_RECOMMENDATIONS, MAX_WEB_SOURCES, Candidate, ConstraintCheck,
+                        DiscoveryError, Evidence,
                         MusicRequest, ParsedIntent, PreferenceCheck, Recommendation,
                         SupportedClaim, TasteCriterion)
 
@@ -249,8 +250,8 @@ def test_soft_preferences_are_scored_and_partial_matches_are_kept():
     assert result.used_partial_matches is True
 
 
-def test_candidate_without_any_preference_match_is_not_returned():
-    """Candidate without any preference match is not returned."""
+def test_candidate_without_any_preference_match_is_listed_unscored_not_as_a_match():
+    """A song with no supported preference gets no score, but its source still names it, so it is listed."""
     e = source()
     preference = TasteCriterion("mood", "preference", "peaceful", 3, "peaceful")
     parsed = ParsedIntent([preference], ["peaceful songs"])
@@ -259,8 +260,71 @@ def test_candidate_without_any_preference_match_is_not_returned():
     ])
     result, _ = run(MusicRequest("peaceful"), evidence=e, analyze=Mock(return_value=parsed),
                     generate=Mock(return_value=[rec]))
+    assert [(r.title, r.fit_score) for r in result.recommendations] == [("Take Five", None)]
+    assert result.recommendations[0].uncertainties == ["We couldn't check this song's fit against the source."]
+    assert result.warnings == []
+
+
+def test_a_song_a_source_contradicts_on_a_preference_is_not_listed_at_all():
+    """Topping up never brings back a song whose verdict says the source contradicts a preference."""
+    e = source()
+    preference = TasteCriterion("mood", "preference", "peaceful", 3, "peaceful")
+    rec = recommendation(e, preference_checks=[
+        PreferenceCheck("mood:peaceful:preference", "contradicted", "web_1", "instrumental jazz")])
+    result, _ = run(MusicRequest("peaceful"), evidence=e,
+                    analyze=Mock(return_value=ParsedIntent([preference], ["peaceful songs"])),
+                    generate=Mock(return_value=[rec]))
     assert result.recommendations == []
     assert "matching any requested preference" in result.warnings[-1]
+
+
+def test_checked_songs_come_first_and_the_rest_are_topped_up_from_the_sources():
+    """A broad request keeps its checked songs and fills the list with the other songs the sources name."""
+    pages = [source(f"Song {n}", f"Artist {n}", f"web_{n}") for n in range(1, 8)]
+    candidates = [Candidate(f"Song {n}", f"Artist {n}", [f"web_{n}"]) for n in range(1, 8)]
+    result, deps = run(search=Mock(return_value=pages), extract=Mock(return_value=candidates),
+                       generate=Mock(return_value=[recommendation(pages[4])]))  # the model judged one song
+    assert [(r.title, r.fit_score) for r in result.recommendations] == [
+        ("Song 5", 1.0), ("Song 1", None), ("Song 2", None), ("Song 3", None), ("Song 4", None),
+        ("Song 6", None), ("Song 7", None)]
+    assert deps["generate"].call_count == 1  # topping up costs no extra model call
+    assert not result.warnings
+
+
+def test_topping_up_skips_songs_the_model_judged_merely_named_not_tied_to_the_request():
+    """A rock request is not padded with songs a generic list names but the model says it never ties to rock."""
+    pages = [Evidence("web_1", "web", "The 200 Best Rock Songs", "Seven Nation Army by The White Stripes.", "https://example.org/a"),
+             Evidence("web_2", "web", "500 Best Songs of All Time", "Africa by Toto is a classic.", "https://example.org/b")]
+    candidates = [Candidate("Seven Nation Army", "The White Stripes", ["web_1"], fits_request=True),
+                  Candidate("Africa", "Toto", ["web_2"], fits_request=False)]
+    result, _ = run(MusicRequest("rock"), search=Mock(return_value=pages), extract=Mock(return_value=candidates),
+                    generate=Mock(return_value=[]))
+    assert [r.title for r in result.recommendations] == ["Seven Nation Army"]
+
+
+def test_topping_up_stops_at_the_display_limit():
+    """The checked and topped-up songs together never exceed MAX_RECOMMENDATIONS."""
+    total = MAX_RECOMMENDATIONS + 4
+    pages = [source(f"Song {n}", f"Artist {n}", f"web_{n}") for n in range(1, total + 1)]
+    candidates = [Candidate(f"Song {n}", f"Artist {n}", [f"web_{n}"]) for n in range(1, total + 1)]
+    result, _ = run(search=Mock(return_value=pages), extract=Mock(return_value=candidates),
+                    generate=Mock(return_value=[recommendation(pages[0])]))
+    assert len(result.recommendations) == MAX_RECOMMENDATIONS
+    assert result.recommendations[0].fit_score == 1.0
+
+
+def test_a_request_with_hard_criteria_is_never_topped_up():
+    """Source-named songs cannot stand in for a requirement nothing established."""
+    hard = TasteCriterion("vocals", "must_avoid", "vocals", 3, "no vocals")
+    pages = [source(f"Song {n}", f"Artist {n}", f"web_{n}") for n in range(1, 4)]
+    candidates = [Candidate(f"Song {n}", f"Artist {n}", [f"web_{n}"]) for n in range(1, 4)]
+    checked = recommendation(pages[0], constraint_checks=[
+        ConstraintCheck("vocals:vocals:must_avoid", "supported", "web_1", "instrumental jazz")])
+    result, _ = run(MusicRequest("jazz with no vocals"), search=Mock(return_value=pages),
+                    extract=Mock(return_value=candidates),
+                    analyze=Mock(return_value=ParsedIntent([hard], ["instrumental jazz songs"])),
+                    generate=Mock(return_value=[checked]))
+    assert [r.title for r in result.recommendations] == ["Song 1"]
 
 
 def test_unknown_hard_constraint_lists_the_song_as_unverified_instead_of_matching_it():
@@ -450,8 +514,8 @@ def test_one_invalid_song_does_not_discard_the_valid_ones(caplog):
     result, deps = run(search=Mock(return_value=[first, second]), extract=Mock(return_value=candidates),
                        generate=Mock(return_value=[recommendation(first), with_fabricated_quote(recommendation(second))]),
                        retry_invalid=True, degrade_invalid=True)
-    assert [rec.title for rec in result.recommendations] == ["Song 1"]
-    assert result.recommendations[0].fit_score == 1.0
+    # Song 2's invented quote costs it its score, but its source still names it, so it follows unscored.
+    assert [(rec.title, rec.fit_score) for rec in result.recommendations] == [("Song 1", 1.0), ("Song 2", None)]
     assert deps["generate"].call_count == 1
     assert not result.warnings
     assert "recommendation_rejected reason=claim_quote_not_in_source position=1" in caplog.text
@@ -504,8 +568,9 @@ def test_degraded_recommendations_never_match_a_hard_criterion():
 
 
 def test_unestablished_recommendation_gets_a_generic_warning():
-    """Unestablished recommendation gets a generic warning."""
-    result, _ = run(generate=Mock(return_value=[]))
+    """Unestablished recommendation gets a generic warning when not even a source-named song remains."""
+    with patch("src.discovery._source_identified", return_value=[]):
+        result, _ = run(generate=Mock(return_value=[]))
     assert result.warnings == ["The retrieved evidence did not establish a supported recommendation."]
 
 
@@ -628,20 +693,20 @@ def test_supported_hard_constraint_keeps_the_candidate():
     [PreferenceCheck("mood:peaceful:preference", "unknown", "web_1", "instrumental jazz")],
     [PreferenceCheck("mood:peaceful:preference", "supported", "web_1", "soft ballad")],
 ], ids=["missing", "bad-status", "unknown-with-quote", "fabricated-quote"])
-def test_preference_checks_must_be_complete_and_quote_the_source(checks):
-    """Preference checks must be complete and quote the source."""
+def test_incomplete_or_unquoted_preference_checks_cost_the_score_not_the_song(checks):
+    """A preference check that is missing or does not quote the source counts as unknown: no score, no rejection."""
     e = source()
     peaceful = TasteCriterion("mood", "preference", "peaceful", 3, "peaceful")
-    with pytest.raises(DiscoveryError) as exc:
-        run(MusicRequest("peaceful"), evidence=e,
-            analyze=Mock(return_value=ParsedIntent([peaceful], ["peaceful songs"])),
-            generate=Mock(return_value=[recommendation(e, preference_checks=checks)]))
-    assert exc.value.code == "invalid_response"
+    result, deps = run(MusicRequest("peaceful"), evidence=e,
+                       analyze=Mock(return_value=ParsedIntent([peaceful], ["peaceful songs"])),
+                       generate=Mock(return_value=[recommendation(e, preference_checks=checks)]))
+    assert [(rec.title, rec.fit_score) for rec in result.recommendations] == [("Take Five", None)]
+    assert deps["generate"].call_count == 1  # nothing was rejected, so there was no retry
 
 
-def test_results_are_ranked_by_fit_and_capped_at_five():
-    """Results are ranked by fit and capped at five."""
-    evidence = [source(f"Song {i}", f"Artist {i}", f"web_{i}") for i in range(1, 8)]
+def test_results_are_ranked_by_fit_and_capped_at_the_display_limit():
+    """Results are ranked by fit and capped at MAX_RECOMMENDATIONS."""
+    evidence = [source(f"Song {i}", f"Artist {i}", f"web_{i}") for i in range(1, MAX_JUDGED + 1)]
     parsed = ParsedIntent([criterion(weight=1)], ["jazz songs"])
 
     def rec(e, status):
@@ -654,8 +719,8 @@ def test_results_are_ranked_by_fit_and_capped_at_five():
                     search=Mock(return_value=evidence),
                     extract=Mock(return_value=[Candidate(*e.title.split(" — "), [e.id]) for e in evidence]),
                     generate=Mock(return_value=recs))
-    assert len(result.recommendations) == 5
-    assert (result.recommendations[0].title, result.recommendations[0].fit_score) == ("Song 7", 1.0)
+    assert len(result.recommendations) == MAX_RECOMMENDATIONS
+    assert (result.recommendations[0].title, result.recommendations[0].fit_score) == (f"Song {MAX_JUDGED}", 1.0)
     assert result.used_partial_matches is True
 
 
@@ -734,12 +799,12 @@ def test_degraded_intent_searches_the_whole_request_collapsed_and_capped():
     assert with_reference.intent.search_queries == ["jazz piano So What — Miles Davis"]
 
 
-def test_only_the_first_twelve_search_results_are_used():
-    """Only the first twelve search results are used."""
-    pages = [source(f"Song {n}", f"Artist {n}", f"web_{n}") for n in range(1, 16)]
+def test_only_the_first_max_web_sources_search_results_are_used():
+    """Only the first MAX_WEB_SOURCES search results are used."""
+    pages = [source(f"Song {n}", f"Artist {n}", f"web_{n}") for n in range(1, MAX_WEB_SOURCES + 4)]
     extract = Mock(return_value=[])
     result, _ = run(search=Mock(return_value=pages), extract=extract)
-    assert extract.call_args.args[2] == pages[:12] and result.evidence == pages[:12]
+    assert extract.call_args.args[2] == pages[:MAX_WEB_SOURCES] and result.evidence == pages[:MAX_WEB_SOURCES]
 
 
 @pytest.mark.parametrize("bad", [
@@ -859,13 +924,14 @@ def test_fallback_names_the_source_page_and_shortens_a_long_title_at_a_word():
     assert "(from" not in untitled.explanation
 
 
-def test_fallback_lists_at_most_five_songs_in_source_order_when_none_matches_the_request():
-    """Fallback lists at most five songs in source order when none matches the request."""
-    songs = [(f"Song {n}", f"Artist {n}") for n in range(1, 8)]
-    page = " ".join(f"Song {n} by Artist {n}." for n in range(1, 8))
+def test_fallback_lists_at_most_the_display_limit_in_source_order_when_none_matches_the_request():
+    """Fallback lists at most MAX_RECOMMENDATIONS songs in source order when none matches the request."""
+    total = MAX_RECOMMENDATIONS + 2
+    songs = [(f"Song {n}", f"Artist {n}") for n in range(1, total + 1)]
+    page = " ".join(f"Song {n} by Artist {n}." for n in range(1, total + 1))
     recs = run_fallback(page, songs, criterion(value="slower beats", source_text="jazz"),
                         source_title="Playlist")
-    assert [rec.title for rec in recs] == [f"Song {n}" for n in range(1, 6)]
+    assert [rec.title for rec in recs] == [f"Song {n}" for n in range(1, MAX_RECOMMENDATIONS + 1)]
 
 
 def test_fallback_cites_the_source_that_actually_identifies_the_song():

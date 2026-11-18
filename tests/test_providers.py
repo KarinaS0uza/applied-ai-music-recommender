@@ -17,7 +17,7 @@ from src.providers import (DEFAULT_EMBEDDING_MODEL, DEFAULT_MODEL, EMBEDDING_DIM
                            MUSIC_SOURCE_DOMAINS, MusicBrainzProvider, RateLimiter, Settings,
                            TavilyProvider, TTLCache,
                            http_json, optional_text_field, provider_error, strings, text_field)
-from src.models import (CHECK_STATUSES, CRITERION_KINDS, INTENT_FACETS, Candidate,
+from src.models import (CHECK_STATUSES, CRITERION_KINDS, INTENT_FACETS, MAX_CANDIDATES, MAX_JUDGED, Candidate,
                         ConstraintCheck, DiscoveryError, Evidence, MusicRequest, ParsedIntent,
                         PreferenceCheck, Recommendation, SupportedClaim, TasteCriterion)
 
@@ -520,6 +520,21 @@ def test_candidate_extraction_drops_albums_and_playlists():
     assert candidates == [Candidate("So What", "Miles Davis", ["web_1"])]
 
 
+def test_candidate_extraction_carries_the_models_fit_judgment():
+    """The model's fits_request verdict is kept on each candidate; a missing one defaults to fitting."""
+    provider = GeminiProvider(Settings("fixture", "fixture"), client=gemini_client([{
+        "candidates": [
+            {"title": "So What", "artist": "Miles Davis", "entity_type": "song", "fits_request": True,
+             "source_ids": ["web_1"]},
+            {"title": "Africa", "artist": "Toto", "entity_type": "song", "fits_request": False,
+             "source_ids": ["web_1"]},
+        ]
+    }]))
+    evidence = [Evidence("web_1", "web", "Songs", "So What by Miles Davis. Africa by Toto.", "https://example.org/x")]
+    fits = [c.fits_request for c in provider.extract_candidates(MusicRequest("jazz"), jazz_intent(), evidence)]
+    assert fits == [True, False]
+
+
 # --- configuration and caching -------------------------------------------------------------
 
 def test_settings_read_the_process_environment_when_no_mapping_is_given(monkeypatch):
@@ -641,19 +656,19 @@ def test_http_json_gives_up_when_the_total_time_budget_is_spent():
 def test_tavily_sends_at_most_two_trimmed_queries_and_keeps_bounded_results():
     """Tavily sends at most two trimmed queries and keeps bounded results."""
     results = [{"title": "jazz " + "t" * 400, "content": "jazz " + "c" * 4000, "url": f"https://example.org/{n}"}
-               for n in range(8)]
+               for n in range(12)]
     session = Session({"results": results})
     intent = ParsedIntent([], ["jazz " + "x" * 500, "second jazz query", "third jazz query"])
     evidence = TavilyProvider("fixture-key", session=session, cache=TTLCache()).search_web(MusicRequest("jazz"), intent)
     assert len(session.calls) == 2  # the third query is never sent
     args, kwargs = session.calls[0]
     assert args == ("https://api.tavily.com/search",) and kwargs["headers"] == {"Authorization": "Bearer fixture-key"}
-    assert len(kwargs["json"]["query"]) == 390 and kwargs["json"]["max_results"] == 6
+    assert len(kwargs["json"]["query"]) == 390 and kwargs["json"]["max_results"] == 10
     assert kwargs["json"]["include_raw_content"] is False
     assert "include_domains" not in kwargs["json"]
     assert session.calls[1][1]["json"]["query"] == "second jazz query"
     assert session.calls[1][1]["json"]["include_domains"] == list(MUSIC_SOURCE_DOMAINS)
-    assert [e.id for e in evidence] == [f"web_{n}" for n in range(1, 7)]  # six of eight kept; the repeat query adds none
+    assert [e.id for e in evidence] == [f"web_{n}" for n in range(1, 11)]  # ten of twelve kept; the repeat query adds none
     assert all(e.kind == "web" and len(e.title) == 300 and len(e.text) == 3000 for e in evidence)
     assert evidence[0].retrieved_at and evidence[0].retrieved_at.endswith("+00:00")
 
@@ -988,12 +1003,13 @@ def test_subjective_facets_become_preferences_unless_the_listener_made_them_mand
 
 
 @pytest.mark.parametrize("rows", [
-    [{"title": f"Song {n}", "artist": "A", "entity_type": "song", "source_ids": ["web_1"]} for n in range(9)],
+    [{"title": f"Song {n}", "artist": "A", "entity_type": "song", "source_ids": ["web_1"]}
+     for n in range(MAX_CANDIDATES + 1)],
     [{"title": "So What", "artist": "Miles Davis", "entity_type": "song",
       "source_ids": [f"web_{n}" for n in range(13)]}],
     [{"title": " ", "artist": "Miles Davis", "entity_type": "song", "source_ids": ["web_1"]}],
     [{"title": "So What", "artist": "Miles Davis", "entity_type": "song", "source_ids": "web_1"}],
-], ids=["nine-candidates", "thirteen-sources", "blank-title", "sources-not-a-list"])
+], ids=["too-many-candidates", "thirteen-sources", "blank-title", "sources-not-a-list"])
 def test_candidate_rows_must_respect_size_and_shape_limits(rows):
     """Candidate rows must respect size and shape limits."""
     provider = GeminiProvider(Settings("fixture", "fixture"), client=gemini_client([{"candidates": rows}]))
@@ -1002,10 +1018,10 @@ def test_candidate_rows_must_respect_size_and_shape_limits(rows):
     assert exc.value.code == "invalid_response"
 
 
-def test_more_than_eight_recommendation_rows_are_invalid():
-    """More than eight recommendation rows are invalid."""
+def test_more_than_the_judged_limit_of_recommendation_rows_is_invalid():
+    """More recommendation rows than MAX_JUDGED are invalid."""
     provider = GeminiProvider(Settings("fixture", "fixture"),
-                              client=gemini_client([{"recommendations": [GOOD_ROW] * 9}]))
+                              client=gemini_client([{"recommendations": [GOOD_ROW] * (MAX_JUDGED + 1)}]))
     with pytest.raises(DiscoveryError) as exc:
         provider.generate_recommendations(MusicRequest("jazz"), jazz_intent(), [], [])
     assert exc.value.code == "invalid_response"
