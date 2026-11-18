@@ -8,8 +8,12 @@ You will implement the functions in recommender.py:
 - score_song
 - recommend_songs
 """
+
+# Behavior: with --query it runs web discovery and prints sources and links; without it, it prints ranked catalog tables for sample profiles.
 import argparse
 import textwrap
+import logging
+from pathlib import Path
 
 from src.recommender import RANKING_STRATEGIES, load_songs, recommend_songs
 
@@ -29,6 +33,7 @@ def print_recommendation_table(recommendations) -> None:
     border = "+" + "+".join("-" * (width + 2) for width in widths) + "+"
 
     def print_row(values) -> None:
+        """Print one table row with each cell wrapped to its column width."""
         wrapped = [
             textwrap.wrap(
                 str(value),
@@ -56,6 +61,7 @@ def print_recommendation_table(recommendations) -> None:
 
 
 def main() -> None:
+    """Parse the command-line arguments and run a discovery query or the sample profiles."""
     parser = argparse.ArgumentParser(description="Run the music recommender.")
     parser.add_argument(
         "--strategy",
@@ -63,10 +69,46 @@ def main() -> None:
         default="current",
         help="Ranking mode: current, genre-first, mood-first, or energy-focused.",
     )
+    parser.add_argument("--query", help="Discover music from a natural-language description.")
+    parser.add_argument("--reference", help="Optional reference song and artist.")
+    parser.add_argument("--enhanced", action="store_true", help="Add custom documents and MusicBrainz metadata.")
     args = parser.parse_args()
+    if args.query is not None:
+        from src.composition import find_music
+        from src.models import DiscoveryError, MusicRequest
+        from src.utils import platform_search_links
+        logging.basicConfig(level=logging.WARNING)
+        logging.getLogger("src").setLevel(logging.INFO)
+        try:
+            result = find_music(MusicRequest(args.query, args.reference, args.enhanced))
+        except DiscoveryError as error:
+            parser.exit(1, f"{error}\n")
+        sources = {e.id: e for e in result.evidence}
+        for rank, rec in enumerate(result.recommendations, 1):
+            print(f"\n{rank}. {rec.title} — {rec.artist}\n{rec.explanation}")
+            for uncertainty in rec.uncertainties:
+                print(f"Uncertainty: {uncertainty}")
+            for id in rec.source_ids:
+                if sources[id].url:
+                    print(f"Source [{id}]: {sources[id].url}")
+            video = rec.video
+            if video:
+                print(f"YouTube video: {video.url} ({video.title} — {video.channel})")
+            for label, url in platform_search_links(rec.title, rec.artist).items():
+                if video and label == "YouTube search":
+                    continue
+                print(f"{label}: {url}")
+        for warning in result.warnings:
+            print(f"Notice: {warning}")
+        for notice in result.notices:
+            print(f"Metadata note: {notice}")
+        return
     strategy = RANKING_STRATEGIES[args.strategy]
 
-    songs = load_songs("data/songs.csv")
+    try:
+        songs = load_songs(str(Path(__file__).resolve().parents[1] / "data/songs.csv"))
+    except (OSError, ValueError, KeyError):
+        parser.exit(1, "The CSV catalog could not be read. Check its file format and location.\n")
 
     profiles = [
         (

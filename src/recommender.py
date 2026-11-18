@@ -1,6 +1,13 @@
+"""Catalog loading and ranking logic for the music recommender."""
+
+# Behavior: loads the CSV catalog and ranks songs by weighted genre, mood and energy matches, with a penalty for repeated artists.
+
 import csv
+import difflib
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
+
+from src.utils import normalize
 
 @dataclass
 class Song:
@@ -36,18 +43,21 @@ class Recommender:
     Required by tests/test_recommender.py
     """
     def __init__(self, songs: List[Song]):
+        """Store the songs this recommender can choose from."""
         self.songs = songs
 
     def recommend(self, user: UserProfile, k: int = 5) -> List[Song]:
+        """Return the top k songs for a user profile (placeholder: currently the first k songs)."""
         # TODO: Implement recommendation logic
         return self.songs[:k]
 
     def explain_recommendation(self, user: UserProfile, song: Song) -> str:
+        """Explain why a song was recommended (placeholder text for now)."""
         # TODO: Implement explanation logic
         return "Explanation placeholder"
 
 def load_songs(csv_path: str) -> List[Dict]:
-    """Load songs, preserving unknown numeric and multi-value metadata safely."""
+    """Load songs, preserving unknown numeric and multi-value metadata safely; lines starting with # are skipped."""
     songs = []
     float_fields = {
         "energy",
@@ -58,7 +68,7 @@ def load_songs(csv_path: str) -> List[Dict]:
     }
 
     with open(csv_path, newline="", encoding="utf-8") as csv_file:
-        for row in csv.DictReader(csv_file):
+        for row in csv.DictReader(line for line in csv_file if not line.startswith("#")):
             row["id"] = int(row["id"])
             for field in float_fields:
                 raw_value = row[field].strip()
@@ -80,6 +90,13 @@ def load_songs(csv_path: str) -> List[Dict]:
     print(f"Loaded songs: {len(songs)}")
     return songs
 
+def _genre_matches(song_genre: str, preferred) -> bool:
+    """A preferred genre is one catalog label or a collection of acceptable labels."""
+    if isinstance(preferred, str):
+        return song_genre == preferred
+    return song_genre in preferred
+
+
 @dataclass(frozen=True)
 class RankingStrategy:
     """A replaceable set of weights for the core preference signals."""
@@ -90,10 +107,11 @@ class RankingStrategy:
     energy_weight: float
 
     def score_core(self, user_prefs: Dict, song: Dict) -> Tuple[float, List[str]]:
+        """Score one song against the user preferences and list the reasons for the score."""
         score = 0.0
         reasons = []
 
-        if song["genre"] == user_prefs["genre"]:
+        if _genre_matches(song["genre"], user_prefs["genre"]):
             score += self.genre_weight
             reasons.append(f"genre match (+{self.genre_weight:.1f})")
 
@@ -117,7 +135,7 @@ class RankingStrategy:
 
 RANKING_STRATEGIES = {
     # Keep the existing scoring as the default so existing rankings are stable.
-    "current": RankingStrategy("current", "Current scoring", 1.0, 1.0, 2.0),
+    "current": RankingStrategy("current", "Balanced (Default)", 1.0, 1.0, 2.0),
     "genre-first": RankingStrategy("genre-first", "Genre-First", 3.0, 1.0, 0.5),
     "mood-first": RankingStrategy("mood-first", "Mood-First", 1.0, 3.0, 0.5),
     "energy-focused": RankingStrategy("energy-focused", "Energy-Focused", 0.5, 0.5, 3.0),
@@ -128,6 +146,7 @@ GENRE_REPEAT_PENALTY = 0.5
 
 
 def _resolve_strategy(strategy: Optional[RankingStrategy]) -> RankingStrategy:
+    """Return the given ranking strategy, or the default one when none is given."""
     return strategy or RANKING_STRATEGIES["current"]
 
 
@@ -198,7 +217,12 @@ def recommend_songs(
     selected = []
     selected_artist_counts = {}
     selected_genre_counts = {}
-    preferred_genre = str(user_prefs.get("genre", "")).strip().lower()
+    raw_genre = user_prefs.get("genre", "")
+    preferred_genres = (
+        {raw_genre.strip().lower()}
+        if isinstance(raw_genre, str)
+        else {str(genre).strip().lower() for genre in raw_genre}
+    )
 
     while remaining and len(selected) < k:
         best_index = 0
@@ -225,7 +249,7 @@ def recommend_songs(
             # Keep the user's requested genre eligible for multiple picks.
             genre_penalty = (
                 GENRE_REPEAT_PENALTY * genre_count
-                if genre_count and genre != preferred_genre
+                if genre_count and genre not in preferred_genres
                 else 0.0
             )
 
@@ -257,3 +281,114 @@ def recommend_songs(
             selected_genre_counts[genre] = selected_genre_counts.get(genre, 0) + 1
 
     return selected
+
+
+# Common names that do not appear verbatim in the catalog's genre labels.
+_GENRE_ALIASES = {
+    "baile funk": ("funk carioca",),
+    "favela funk": ("funk carioca",),
+    "funk brasileiro": ("funk carioca", "funk melody"),
+}
+_GENRE_FILLER = {"music", "song", "songs", "genre", "style"}
+
+
+def _name_tokens(*values) -> set:
+    """Collect the normalized word tokens of the given values."""
+    return {token for value in values for token in normalize(str(value or "")).split()}
+
+
+def _catalog_genres(songs: List[Dict]) -> List[str]:
+    """Return the sorted, known genre labels present in the catalog."""
+    return sorted({
+        genre for genre in (str(song.get("genre", "")).strip().lower() for song in songs)
+        if genre and genre != "unknown"
+    })
+
+
+def resolve_genres(query: str, songs: List[Dict]) -> List[str]:
+    """Map a free-text genre to the catalog genre labels it confidently names.
+
+    Tries an exact label, a known alias, then a song whose genre, subgenre and
+    language together contain every word ("brazilian funk" finds the funk songs
+    sung in Brazilian Portuguese). Returns [] rather than guessing.
+    """
+    wanted = normalize(query or "")
+    genres = _catalog_genres(songs)
+    exact = [genre for genre in genres if normalize(genre) == wanted]
+    if not wanted or exact:
+        return exact
+    aliased = [genre for genre in _GENRE_ALIASES.get(wanted, ()) if genre in genres]
+    if aliased:
+        return aliased
+    tokens = {token for token in wanted.split() if token not in _GENRE_FILLER}
+    if not tokens:
+        return []
+    return sorted({
+        str(song.get("genre", "")).strip().lower()
+        for song in songs
+        if str(song.get("genre", "")).strip().lower() not in {"", "unknown"}
+        and tokens <= _name_tokens(song.get("genre"), song.get("subgenre"),
+                                   *(song.get("language") or []))
+    })
+
+
+def suggest_genres(query: str, songs: List[Dict], limit: int = 6) -> List[str]:
+    """Catalog genres that share a word with, or are spelled like, the query."""
+    wanted = normalize(query or "")
+    tokens = {token for token in wanted.split() if token not in _GENRE_FILLER}
+    overlap = {}
+    for song in songs:
+        genre = str(song.get("genre", "")).strip().lower()
+        if not genre or genre == "unknown":
+            continue
+        shared = len(tokens & _name_tokens(genre, song.get("subgenre")))
+        if shared:
+            overlap[genre] = max(overlap.get(genre, 0), shared)
+    ranked = sorted(overlap, key=lambda genre: (-overlap[genre], genre))
+    for genre in difflib.get_close_matches(wanted, _catalog_genres(songs), n=3, cutoff=0.7):
+        if genre not in ranked:
+            ranked.insert(0, genre)
+    return ranked[:limit]
+
+
+def _has_preference(value) -> bool:
+    """Tell whether a value holds at least one real preference (not blank or unknown)."""
+    if isinstance(value, str):
+        value = value.split(";")
+    return any(
+        str(item).strip() and str(item).strip().lower() != "unknown"
+        for item in (value or [])
+    )
+
+
+def max_score(user_prefs: Dict, strategy: Optional[RankingStrategy] = None) -> float:
+    """The most a song could score for the preferences actually supplied."""
+    selected_strategy = _resolve_strategy(strategy)
+    total = 0.0
+    if _has_preference(user_prefs.get("genre")):
+        total += selected_strategy.genre_weight
+    if _has_preference(user_prefs.get("mood")):
+        total += selected_strategy.mood_weight
+    if user_prefs.get("energy") is not None:
+        total += selected_strategy.energy_weight
+    for key in ("subgenre", "lyrical_theme", "mood_tags", "instrumentation_tags", "language"):
+        if _has_preference(user_prefs.get(key)):
+            total += 1.0
+    return total
+
+
+def match_fraction(
+    user_prefs: Dict,
+    song: Dict,
+    strategy: Optional[RankingStrategy] = None,
+) -> float:
+    """How much of the attainable score a song earns, from 0.0 to 1.0.
+
+    Uses the song's own match, before diversity penalties, so repeating an
+    artist in the list does not make a song look like a worse fit.
+    """
+    ceiling = max_score(user_prefs, strategy)
+    if ceiling <= 0:
+        return 0.0
+    score, _ = score_song(user_prefs, song, strategy)
+    return max(0.0, min(1.0, score / ceiling))
