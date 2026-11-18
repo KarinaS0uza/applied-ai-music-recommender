@@ -24,3 +24,4 @@ venv/
 .env.*
 !.env.example
 .streamlit/secrets.toml
+data/.link_cache.json
