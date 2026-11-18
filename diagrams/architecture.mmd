@@ -12,8 +12,8 @@ flowchart TD
     UI["CLI query or Streamlit form"] -->|"CSV mode"| Scoring
     UI -->|"Description and optional reference"| RAG["discovery.py: shared discovery workflow"]
     RAG --> Intent["Gemini: analyze criteria and focused queries"]
-    Intent --> Web["Tavily: bounded, relevance-filtered searches"]
-    RAG -->|"Enhanced mode"| Docs["Retrieve up to four cards and two guide sections"]
+    Intent --> Web["Tavily: one general + one music-source-focused search"]
+    RAG -->|"Enhanced mode"| Docs["Hybrid lexical + semantic retrieval: up to four cards and two guides"]
     Web --> Extract["Gemini: extract supported candidates"]
     Docs --> Extract
     Extract -->|"Enhanced mode"| Metadata["MusicBrainz: recording identities and versions"]
@@ -27,6 +27,6 @@ flowchart TD
 
     Validate -->|"Invalid model output"| Degrade["Retry once, then warn and keep only source-identified songs"]
     Degrade --> Results
-    Results -->|"No supported match"| Fallback["Related video from retrieved sources, else one CSV catalog pick"]
+    Results -->|"No supported match"| Fallback["Up to five CSV catalog songs, else unverified songs, else a related video, else a plain message"]
     Fallback --> Human
     Guard["Input checks, call limits, timeouts, safe errors"] -.-> RAG

@@ -322,7 +322,7 @@ model, provider eligibility, architecture and setup.
 
 ### Evidence and responsible use
 
-The enhanced path selectively retrieves a project-authored guide and 26
+The enhanced path selectively retrieves a project-authored guide and 56
 source-backed song cards, then looks up candidate recording metadata in
 MusicBrainz. Cards span several genres and languages but remain a tiny,
 editorially selected collection, primarily derived from English Wikipedia.
@@ -337,7 +337,13 @@ not prove the intended version. Missing metadata means unknown coverage, not
 nonexistence. MusicBrainz is not used to infer vocal emotion, BPM or language.
 
 The first generation call separates explicit requirements and exclusions from
-weighted preferences, then produces at most two focused search queries. A second
+weighted preferences, then produces at most two focused search queries. Tavily
+uses the first for a general-web search and the second (or reuses the first) for a
+search restricted to 12 music-focused domains. Both searches retain the same safe-URL,
+content and request-relevance filters. Results from allowlisted hosts and their real
+subdomains are ordered first, but the hostname does not count as evidence and does
+not bypass the normal citation checks. If only the focused call fails, the general
+results remain available. A second
 call extracts song identities while excluding albums, playlists and other
 non-song entities. The final call evaluates hard criteria and soft preferences;
 Python rejects unestablished requirements and ranks supported or partial matches
@@ -405,14 +411,24 @@ after seeing these requests, so the numbers show the failure patterns are gone, 
 how it will do on new requests. The comparison also showed the first version of the
 cut was too aggressive: it dropped two of the four piano cards, which is why the cut
 ignores the language boost and sits at 35%, between the 0.30 share of a noise match
-and the 0.39 share of a useful one. That margin is narrow and tuned to a 26-card
-collection, so it should be rechecked if the collection grows. The Teardrop miss
+and the 0.39 share of a useful one. That margin is narrow and was tuned to a 26-card
+collection, so it needed to be rechecked when the collection grew. The Teardrop miss
 is not fixed offline: lexical matching cannot link "expressive" to "mournful", and
 only the synonyms from the live analysis step bridge that (covered by
 `test_expanded_query_still_reaches_cards_the_original_words_miss`). The table above
 is the dated record of the original run and is left as recorded; the live
 Gemini answers were not re-run, so the effect on generated recommendations is
 unmeasured.
+
+**Reproducible regression, November 17, 2026.** The six documented requests are
+now stored as an offline fixture with fixed query expansions and human-labeled
+relevant card IDs. After the collection expanded to 56 cards, generic terms stopped
+contributing rank weight, broad mood/energy terms became supporting signals, and
+explicit language, instrumental and metal requests gained bounded filters. The
+current retriever returns all 15 labeled-relevant cards among 15 cards total
+(micro precision 1.00, recall 1.00). The test requires both
+metrics to remain at or above 0.90 as the card collection grows. This is a local
+retrieval measurement, not a generated-answer or listener-satisfaction score.
 
 The offline run's JSON report recorded actual document IDs, card titles, guide
 sections and context sizes. A real generated-answer comparison would use the same
@@ -437,10 +453,14 @@ can inspect. **Not intended for** judging a listener's taste, replacing a
 streaming service's personalization, or establishing facts about a recording
 without checking the cited source.
 
-- **Coverage and popularity bias.** The 26 song cards are hand-selected and all
+- **Coverage and popularity bias.** The 56 song cards are hand-selected and all
   summarize English Wikipedia pages, so well-documented, popular and
   English-language recordings are overrepresented. Web discovery through Tavily
-  inherits that search engine's ranking and language skew. A missing record means
+  inherits that search engine's ranking and language skew. Its focused call favors
+  an editorial list of 12 established music domains; this can improve music-specific
+  context, but can also reinforce mainstream, English-language and publication-access
+  bias. The parallel general search remains available, and specialist status is only
+  an ordering tie-breaker, not a truth signal. A missing record means
   unknown coverage, not that a song does not exist.
 - **Unverified catalog labels.** The 1,000-song CSV carries genre, mood, energy and
   other labels that have not been independently verified, and some entries are
@@ -449,12 +469,15 @@ without checking the cited source.
   judgments. The system checks whether a source supports a trait (supported,
   partial or unknown). Its fit score is the weighted share of supported
   preferences, not a probability that a listener will enjoy the song.
-- **Shallow retrieval.** The local index is lexical. In the recorded comparison it
-  missed the Teardrop card for an expressive-vocals request and could not establish
-  a clean-singing exclusion. It now filters out loose matches, but the cut-off is
-  tuned to the current 26 cards and a lexical match can still miss a paraphrase. Language handling is limited to a few English and
-  Portuguese aliases, and vocal-exclusion omission checks cover common English and
-  Portuguese phrasing only.
+- **Hybrid retrieval remains bounded.** The recorded comparison predates semantic
+  retrieval: its lexical index missed the Teardrop card for an expressive-vocals
+  request and could not establish a clean-singing exclusion. The current enhanced
+  path keeps those lexical filters and can add at most two semantic-only cards above
+  a fixed similarity threshold when fewer than four lexical cards qualify. This can
+  recover paraphrases, but semantic similarity is not evidence that a requested
+  trait is true; the normal citation and hard-constraint validators still decide
+  what may be recommended. Language handling and the live quality gain remain
+  unmeasured.
 - **Guardrails check form, not truth.** Exact-excerpt checks show that a quote
   appears in the cited source and that the source names the song. They cannot show
   that a paraphrase is fair. Duplicated or syndicated text is not independent
@@ -495,7 +518,10 @@ without checking the cited source.
 
 | Check | Result |
 | --- | --- |
-| Automated tests (controlled provider responses, no network) | 498 of 498 pass |
+| Automated tests (controlled provider responses, no network) | 593 of 593 pass |
+| Deterministic six-request local retrieval fixture | 1.00 micro precision, 1.00 recall (15 relevant cards retrieved out of 15 returned) |
+| Hybrid fusion and fallback tests | Semantic agreement reranks qualified cards; at most two high-similarity cards fill unused slots; failures reproduce lexical output |
+| Music-source search tests | One general and one domain-focused call stay within the two-call limit; safe/relevance filters still apply; lookalike hosts remain general; focused failure keeps general results |
 | Retrieval comparison, six requests | 2 clear gains, 2 partial gains, 2 no improvement |
 | Live end-to-end CLI runs, November 17, 2026 (8 attempts, listed in the [README](README.md#5-live-end-to-end-runs-tavily-musicbrainz-gemini)) | 1 passed every validator, 2 listed source-named songs with fit unconfirmed, 2 returned nothing rather than relax a required trait, 3 hit a Gemini error |
 | Blank input | No provider calls; helpful message |
@@ -550,7 +576,7 @@ shared types in `src/models.py`, text and URL helpers in `src/utils.py`, evidenc
 checks in `src/validation.py`, the staged workflow in `src/discovery.py`, and provider
 wiring plus `find_music` in `src/composition.py`. `find_music` is still the one entry
 point for the command line and Streamlit, `src/rag.py` no longer exists, and the
-suite now has 498 passing tests. `tests/test_rag.py` keeps its name and now covers
+suite now has 593 passing tests. `tests/test_rag.py` keeps its name and now covers
 the whole discovery pipeline.
 
 **A suggestion I did not accept as written.** The assistant's first retrieval index
@@ -563,4 +589,4 @@ language above generic wording, and I added regression tests for both cases
 `test_explicit_language_outweighs_generic_language_word`). The revised index still
 fails on paraphrases such as the expressive-vocals request, so I documented that
 limit rather than adding a vector database, which would have added a dependency
-and an extra API for a collection of 26 cards.
+and an extra API for a collection of 56 cards.

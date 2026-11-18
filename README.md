@@ -45,8 +45,8 @@ flowchart TD
     UI["CLI query or Streamlit form"] -->|"CSV mode"| Scoring
     UI -->|"Description and optional reference"| RAG["discovery.py: shared discovery workflow"]
     RAG --> Intent["Gemini: analyze criteria and focused queries"]
-    Intent --> Web["Tavily: bounded, relevance-filtered searches"]
-    RAG -->|"Enhanced mode"| Docs["Retrieve up to four cards and two guide sections"]
+    Intent --> Web["Tavily: one general + one music-source-focused search"]
+    RAG -->|"Enhanced mode"| Docs["Hybrid lexical + semantic retrieval: up to four cards and two guides"]
     Web --> Extract["Gemini: extract supported candidates"]
     Docs --> Extract
     Extract -->|"Enhanced mode"| Metadata["MusicBrainz: recording identities and versions"]
@@ -60,7 +60,7 @@ flowchart TD
 
     Validate -->|"Invalid model output"| Degrade["Retry once, then warn and keep only source-identified songs"]
     Degrade --> Results
-    Results -->|"No supported match"| Fallback["Related video from retrieved sources, else one CSV catalog pick"]
+    Results -->|"No supported match"| Fallback["Up to five CSV catalog songs, else unverified songs, else a related video, else a plain message"]
     Fallback --> Human
     Guard["Input checks, call limits, timeouts, safe errors"] -.-> RAG
 ```
@@ -69,10 +69,13 @@ The diagram source is [diagrams/architecture.mmd](diagrams/architecture.mmd).
 
 **Data flow.** A CLI query or Streamlit form builds one `MusicRequest` and calls
 `find_music` in `src/composition.py`, so both interfaces share a single pipeline. Gemini
-turns the request into criteria and one or two focused search queries; Tavily
-retrieves web excerpts; in enhanced mode (always on in the Streamlit app, opt-in
-with `--enhanced` on the CLI) a local index adds relevant guide sections
-and song cards, and MusicBrainz adds recording identities. Gemini extracts and then
+turns the request into criteria and one or two focused search queries. Tavily uses
+at most two calls: one general-web search and one search restricted to a small,
+explicit set of music-focused domains. It applies the same URL, content and
+request-relevance checks to both, deduplicates them, and places qualifying specialist
+sources first without treating their domain as proof. In enhanced mode (always on in the Streamlit app, opt-in
+with `--enhanced` on the CLI) a hybrid lexical/semantic index adds relevant guide
+sections and song cards, and MusicBrainz adds recording identities. Gemini extracts and then
 evaluates candidates against that evidence. Python validates the result, computes
 the fit score and returns the top five.
 
@@ -130,7 +133,12 @@ your machine:
 ```toml
 TAVILY_API_KEY = "your-tavily-key"
 GEMINI_API_KEY = "your-gemini-key"
+# GEMINI_EMBEDDING_MODEL = "gemini-embedding-001"
+# SEMANTIC_RETRIEVAL_ENABLED = false     # optional lexical-only kill switch
+# MUSIC_SOURCE_FOCUS_ENABLED = false     # optional general-web-only kill switch
 # YOUTUBE_API_KEY = "your-youtube-key"   # optional, see below
+# SPOTIFY_CLIENT_ID = "your-spotify-client-id"          # optional, both or neither
+# SPOTIFY_CLIENT_SECRET = "your-spotify-client-secret"
 ```
 
 Streamlit looks for `.streamlit/secrets.toml` in the folder you start the app from, so
@@ -144,7 +152,14 @@ Streamlit prints the local address (usually `http://localhost:8501`); stop it wi
 `Ctrl+C`. You can also set `TAVILY_API_KEY` and `GEMINI_API_KEY` as environment variables
 instead. Never commit them. The Streamlit app reads
 server-side configuration, so viewers never enter keys. `GEMINI_MODEL` defaults to
-`gemini-3.5-flash-lite`. `MUSICBRAINZ_CONTACT` defaults to this project's GitHub
+`gemini-3.5-flash-lite` and `GEMINI_EMBEDDING_MODEL` to `gemini-embedding-001`.
+Set `SEMANTIC_RETRIEVAL_ENABLED=false` to use the original lexical local retrieval
+without disabling the rest of enhanced mode. The web search also makes one bounded
+music-focused request by default, using AllMusic, Bandcamp, Billboard, Discogs,
+Last.fm, MusicBrainz, MusicRadar, NPR, Official Charts, Pitchfork, Rolling Stone and
+Stereogum. Set `MUSIC_SOURCE_FOCUS_ENABLED=false` to restore two unrestricted
+queries (or one when Gemini produced only one query). This changes source targeting,
+not validation: every result still needs safe, relevant evidence. `MUSICBRAINZ_CONTACT` defaults to this project's GitHub
 URL; set it to your own contact URL or email. MusicBrainz needs no key.
 
 **Optional: exact YouTube links.** Add a `YOUTUBE_API_KEY` (a YouTube Data API v3 key
@@ -155,6 +170,16 @@ so an unsure song keeps its search link. Google's default allowance is about 100
 searches a day, so the app looks up at most five songs per request, caches answers for
 24 hours, and stops at 90 searches a day. If the key is missing, rejected or out of
 quota, results still appear with search links.
+
+**Optional: exact Spotify links.** Spotify's Web API has no single key: create an app in
+the [Spotify developer dashboard](https://developer.spotify.com/dashboard) and add its
+`SPOTIFY_CLIENT_ID` and `SPOTIFY_CLIENT_SECRET` (both, or neither). The app uses the
+client-credentials flow, so nobody has to log in to Spotify and the secret stays on the
+server. Each recommendation then links to its exact track instead of a Spotify search,
+under the same strict rule as YouTube: the title and an artist must both match, and live
+takes, remixes, karaoke and covers are skipped (reissue labels such as "Remastered 2013"
+are fine). An unsure song keeps its search link. Lookups cover at most five songs per
+request, are cached for 24 hours, and pause after a rejected secret or a rate limit.
 
 The command-line interface reads environment variables:
 
@@ -195,14 +220,20 @@ never switches to a paid model or advanced Tavily search on its own.
 
 1. Gemini first converts the request into source-linked taste criteria and one or
    two focused search queries. Mood, energy and activity fit stay weighted
-   preferences unless the listener explicitly makes them mandatory.
+   preferences unless the listener explicitly makes them mandatory. Explicit vocal
+   phrases such as "clean singing", "instrumental" and "no screaming" are always hard
+   criteria: if Gemini grades one as a soft vocals preference it is promoted, and if
+   Gemini drops one entirely the analysis is rejected.
 2. Tavily runs at most two basic searches and keeps excerpts that overlap the
    interpreted intent. It returns source excerpts, not a generated answer.
-3. With enhanced retrieval on, a local lexical index selects at most four song
-   cards and two guide sections relevant to the request. A document must match at
-   least one distinctive word (a word like "vocal", found in almost half the
-   documents, cannot qualify it alone), negations such as "no" are not search
-   words, and song cards far weaker than the best card are dropped.
+3. With enhanced retrieval on, the local index combines the existing lexical rank
+   with Gemini text embeddings and still selects at most four song cards and two
+   guide sections. Lexical specificity and autocut rules remain the primary safety
+   gates. Semantic agreement can reorder lexically qualified cards, and up to two
+   cards above cosine similarity 0.65 can fill unused slots; semantic-only cards do
+   not displace a full four-card lexical result. Named references and requested
+   languages retain priority, guides remain lexical, and any embedding failure
+   returns the exact lexical result.
 4. A second Gemini call extracts up to eight song candidates with source IDs,
    excluding albums, playlists and other non-song entities. A candidate must be
    named in its cited web or song-card evidence.
@@ -241,15 +272,20 @@ passage or the page title mentions or does not mention. Songs whose source text
 mentions more of the requested traits are listed first. This is word matching with
 simple stemming and a few synonyms ("happy" also finds "upbeat"), so a mention is
 not proof that the song fits. A warning explains what happened. When no supported
-match remains, the Streamlit app offers a related video from the retrieved sources
-if one exists, or otherwise one pick from the CSV catalog labeled as a backup.
+match remains, or discovery fails outright, the Streamlit app falls back in order to:
+up to five songs ranked from the CSV catalog (labeled "CATALOG FALLBACK", each with a
+match score, a "Why it fits" line and platform links); songs a source names but no
+check could verify (only when the request had hard requirements, labeled "NOT
+VERIFIED"); a related YouTube video from the retrieved sources; and finally a plain
+"no evidence-backed matches" message. The later steps appear only if the catalog
+cannot be read or returns nothing.
 
 ### Retrieval enhancements
 
 | Addition | What it contributes |
 | --- | --- |
 | General music guide | Vocabulary for pace, energy, instrumentation, vocals, languages, references and exclusions; not evidence about particular songs. |
-| 26 song cards | Source-backed descriptions spanning jazz, folk, country, house, techno, hip hop, metal, ambient, piano, samba, bossa nova, raï and several vocal languages. |
+| 56 song cards | Source-backed descriptions spanning jazz, folk, country, rock, pop, K-pop, R&B, hip hop, house, techno, reggaeton, Afrobeats, amapiano, ambient, piano, samba, bossa nova, raï and several vocal languages. Thirty newer cards add sourced tempo, mood, dance, running and sports context where the linked article establishes it. |
 | MusicBrainz | Structured recording identities, releases and disambiguation; missing records and ambiguous versions remain uncertain. |
 
 Cards in `data/knowledge/song_cards.json` carry source URLs, retrieval dates,
@@ -257,15 +293,19 @@ recording versions and explicit unknowns. They are paraphrased summaries of
 English Wikipedia pages (text available under CC BY-SA 4.0; attribution and the
 source list are in [data/knowledge/SOURCES.md](data/knowledge/SOURCES.md)), not independent
 corroboration. The retriever selects relevant
-documents rather than sending the whole collection, and a few lexical aliases help
-Portuguese and English requests; broad multilingual semantic retrieval is a known
-limit. Every card the model sees can become a recommended candidate, so the
+documents rather than sending the whole collection. A small, deterministic alias
+list normalizes close vocabulary such as dreamy/ethereal, melancholic/mournful,
+synth/synthesizer and EDM/electronic, plus a few Portuguese and English variants.
+The optional semantic layer embeds card descriptions, versions, languages and tags,
+but excludes their unknown-trait lists so missing evidence does not attract a card.
+Every card the model sees can become a recommended candidate, so the
 retriever prefers returning nothing to returning a loosely related card (the
 thresholds are `GENERIC_TERM_SHARE` and `AUTOCUT_SHARE` in `src/knowledge.py`).
 Tavily keeps discovering beyond the prepared cards in both modes.
 
-No database is used. Live discoveries are not saved. Tavily responses use a
-bounded 15-minute in-memory cache and MusicBrainz lookups a one-hour cache; both
+No database is used. Live discoveries are not saved. Tavily responses and semantic
+query embeddings use bounded 15-minute in-memory caches, document embeddings use a
+24-hour content-addressed cache, and MusicBrainz lookups a one-hour cache; all
 disappear when the process restarts, and Streamlit keeps displayed results only in
 the current session.
 
@@ -422,8 +462,11 @@ Only attempt 5 passed every validator. Two attempts (1, 8) returned songs whose
 existence the source supports but whose musical fit the validator could not confirm,
 and the output says so. Two (2, 3) returned nothing rather than relax a required
 trait. Three (4, 6, 7) hit a Gemini error that the app reports as "Gemini is
-unavailable." The logs record only the safe code `provider_unavailable`, so I
-cannot say whether it was a quota limit or a temporary outage. Attempt 2 used
+unavailable." Those logs record only the safe code `provider_unavailable`, so I
+cannot say what caused them. A later live run, after the log began recording the
+HTTP status, showed the same message for a Google 503 `UNAVAILABLE` response, so a
+temporary overload is the likeliest cause, though not proven for these three. A
+quota limit would have been reported as a rate limit. Attempt 2 used
 `Goodbye — toe` as the reference song; I did not verify that it exists.
 
 **Attempt 5: a validated result that used the local song cards**
@@ -455,7 +498,8 @@ INFO:src.providers:generation provider=Gemini call=3 latency_ms=7770
 INFO:src.discovery:discovery_complete enhanced=True criteria=3 queries=2 evidence=15 candidates=1 recommendations=1 partial=False latency_ms=20123
 ```
 
-The cited source `card_aguas` is one of the 26 local song cards, so enhanced
+The cited source `card_aguas` was one of the 26 local song cards at the time of
+that recorded run (the collection now has 56), so enhanced
 retrieval changed what the model could cite. Gemini extracted one candidate and it
 passed. The four uncertainties are the traits the evidence does not establish,
 such as exact BPM.
@@ -536,6 +580,33 @@ live answer quality as unproven; the hand-reviewed comparison in the Testing sum
 below is the stronger evidence for the retrieval step. The log blocks for attempts 8
 and 3 are excerpts of the lines that matter; attempt 5's is complete.
 
+## Screenshots
+
+These are the Streamlit app after live runs on November 17, 2026 (Tavily,
+MusicBrainz and Gemini). They show output that validated; the failure cases are
+the pasted text in sample 5, which is the evidence that gets graded. Live results
+vary from run to run, so a rerun can return different songs.
+
+![The Find music tab after "classic bossa nova for a dinner party": five recommendation cards with match scores, a note on how many details could not be confirmed, and YouTube and Spotify links](assets/01-find-music-bossa-nova-results.png)
+
+*Find music: "classic bossa nova for a dinner party" returned five songs. Each card
+shows a match score and says how many details the sources could not confirm.*
+
+![The "Why these songs?" panel, listing for each song the reason it may fit, what could not be confirmed, a quoted excerpt from the source and a link to that source](assets/02-why-these-songs-evidence.png)
+
+*The "Why these songs?" panel is the human check: for each song it shows what the
+evidence supports, what it does not establish, the quoted excerpt and the source.*
+
+![The Find music tab after "upbeat Korean pop for a morning run": a "must-haves" line reading Korean pop and five K-pop recommendation cards](assets/03-find-music-korean-pop-must-haves.png)
+
+*A request with a hard requirement ("Korean pop") is shown under "Your must-haves"
+and every returned song was checked against it.*
+
+![The Music Collection panel ranking the offline catalog for jazz and relaxed, with five catalog cards showing match scores and why each fits](assets/04-music-collection-jazz-relaxed.png)
+
+*Music Collection: ranking the offline catalog for jazz and relaxed. This path needs
+no API keys.*
+
 ## Testing summary
 
 ```bash
@@ -543,25 +614,28 @@ python -m pytest -q
 ```
 
 ```text
-........................................................................ [ 14%]
-........................................................................ [ 28%]
-........................................................................ [ 43%]
-........................................................................ [ 57%]
+........................................................................ [ 12%]
+........................................................................ [ 24%]
+........................................................................ [ 36%]
+........................................................................ [ 48%]
+........................................................................ [ 60%]
 ........................................................................ [ 72%]
-........................................................................ [ 86%]
-..................................................................       [100%]
-498 passed in 5.71s
+........................................................................ [ 84%]
+........................................................................ [ 97%]
+.................                                                        [100%]
+593 passed in 6.63s
 ```
 
 | Test file | Tests | What it covers |
 | --- | --- | --- |
-| `tests/test_rag.py` | 84 | The full discovery pipeline: evidence rules, retries, fallbacks, provider wiring |
-| `tests/test_validation.py` | 81 | Validators: request and intent limits, citation and quote checks, scoring, model feedback |
-| `tests/test_utils.py` | 30 | Text normalization and the safe-URL rules |
+| `tests/test_rag.py` | 92 | The full discovery pipeline: evidence rules, retries, fallbacks, provider wiring |
+| `tests/test_validation.py` | 89 | Validators: request and intent limits, citation and quote checks, scoring, model feedback |
+| `tests/test_utils.py` | 36 | Text normalization and the safe-URL rules |
 | `tests/test_models.py` | 5 | Shared types and their defaults |
-| `tests/test_providers.py` | 110 | Tavily, Gemini and MusicBrainz: limits, caching, safe errors, malformed output |
-| `tests/test_knowledge.py` | 30 | Local retrieval: selective matching, document loading, unsafe files |
-| `tests/test_app.py` | 82 | Streamlit pages, fallbacks, escaping, throttling, catalog mode |
+| `tests/test_providers.py` | 147 | Tavily, focused-source search, Gemini generation/embeddings and MusicBrainz: limits, caching, safe errors, malformed output |
+| `tests/test_knowledge.py` | 54 | Hybrid local retrieval: lexical safety, semantic fusion/fallback, aliases, relevance benchmark, document loading |
+| `tests/test_song_cards.py` | 4 | Expanded card count, source metadata, coverage groups and visible mood/tempo/activity evidence |
+| `tests/test_app.py` | 90 | Streamlit pages, configuration, fallbacks, escaping, throttling, catalog mode |
 | `tests/test_main.py` | 15 | Command-line output and failure exits |
 | `tests/test_recommender.py` | 29 | CSV ranking, strategies, diversity penalties, genre resolution |
 | `tests/test_youtube.py` | 32 | Strict video matching, quota limits, safe fallback |
@@ -604,6 +678,12 @@ Retrieval comparison on six varied requests, each with a written evidence review
 | Heavy guitar music with clean singing and no screaming | Establishes the vocal exclusion | Fail: no source establishes it (unrelated cards are no longer returned) |
 | Reference track plus modal jazz, piano and bass | Adds the requested instrumentation evidence | Pass: adds the piano/bass introduction and pace distinction |
 
+The same six requests now form a deterministic offline regression fixture with
+fixed query expansions and human-labeled relevant card IDs. It retrieves all 15
+relevant cards among 15 returned cards: micro precision **1.00** and recall
+**1.00**. This measures local card retrieval only; it does not call providers or
+claim that the generated recommendations are good.
+
 Guardrail behavior, from the automated suite:
 
 | Test input | Evaluation criteria | Result |
@@ -620,7 +700,7 @@ Guardrail behavior, from the automated suite:
 | Failed validation after the retry | Source-identified songs listed as unscored; none when the request has hard requirements | Pass |
 | MusicBrainz requests across sessions | At least 1.05 s apart, cached repeats skip the request | Pass (injected clock) |
 
-**Result.** 498 of 498 automated tests pass, and the retrieval comparison shows a
+**Result.** 593 of 593 automated tests pass, and the retrieval comparison shows a
 clear gain on 2 of 6 requests, a partial gain on 2 and no gain on 2.
 
 **What worked.** Requiring exact excerpts for every claim made unsupported answers
@@ -628,9 +708,10 @@ fail loudly instead of looking plausible. Keeping scoring in Python made fit sco
 deterministic and explainable. Injected provider dependencies let the whole pipeline
 be tested without network calls.
 
-**What did not.** Simple lexical retrieval misses paraphrases, and until the
+**What did not.** Lexical retrieval alone misses paraphrases, and until the
 specificity filter and autocut were added, generic words such as "vocal" pulled in
-unrelated cards. All-mock tests also missed a live problem: real
+unrelated cards. The hybrid layer now has deterministic fusion and fallback tests,
+but its live relevance improvement has not been measured. All-mock tests also missed a live problem: real
 Gemini output sometimes failed the strict validators and the whole request ended in
 a generic "could not be supported" error. The pipeline now allows one retry and
 then degrades gracefully, as described above, and the app offers clearer
@@ -646,7 +727,12 @@ and its semantic review would stay a human task.
 
 Each discovery makes at most two basic Tavily searches and normally three Gemini
 calls (four with one retry, which the follow-up check on skipped candidates also
-uses); provider and network failures are not retried. HTTP
+uses); a Gemini 503 (overloaded) response is retried once after a two-second pause
+and uses one of those four calls, and other provider and network failures are not
+retried. Enhanced mode also makes one semantic-query embedding request; the first
+request after startup or a card change makes one additional batched document
+embedding request. Embedding failures are not retried and fall back to lexical
+retrieval. HTTP
 requests use 5-second connect and 20-second read timeouts and a 1 MB response cap;
 Gemini has a 30-second timeout and bounded JSON output. Descriptions are capped at
 1,200 characters and references at 200. The Streamlit app adds a 15-second session
@@ -660,7 +746,7 @@ application process; multiple workers would need a shared rate limiter.
 | --- | --- | --- |
 | Fixed, bounded pipeline instead of an autonomous agent | Predictable cost and behavior, and every stage can be tested with controlled inputs | No second attempt with a different strategy when a search misses |
 | Three evidence sources: Tavily, local documents, MusicBrainz | Each does a different job: discovery, domain vocabulary and curated cards, recording identity | More providers to fail, quota and a one-request-per-second MusicBrainz limit |
-| Local lexical index instead of a vector database | Simple, inspectable and free of an extra embedding API | Misses paraphrases and multilingual matches, as the failed cases show |
+| In-memory hybrid lexical/semantic index instead of a vector database | Lexical safety gates remain inspectable while embeddings can recover paraphrases; no persistent service is needed for the small collection | Adds one embedding request per query, needs a similarity threshold, and resets its cache on restart |
 | Gemini extracts and judges, Python validates and scores | The model cannot award itself a good score, and results are reproducible | Strict exact-quote checks reject some fair paraphrases, which is why retry and degradation exist |
 | Mood, energy and activity are weighted preferences; only explicit requirements and exclusions are hard | "Happy, peaceful pop" should return partial matches, not nothing | Partial matches are less precise and are labeled as such |
 | Retrieved text is data, never instructions | Web pages can contain prompt injection | Cannot execute anything a source says, by design |
@@ -718,6 +804,5 @@ catalog labels it names: an exact label, a short alias list ("baile funk" finds
 word ("brazilian funk" finds `funk carioca` and `funk melody`). It returns nothing
 rather than guessing, and the panel says so when a genre or mood matches nothing
 (suggesting related genres for a genre). Cards show a match percentage, the share of the best score
-attainable for the preferences given, before diversity penalties; raw points stay in
-the scoring details table. The historical weight-shift
+attainable for the preferences given, before diversity penalties. The historical weight-shift
 experiment and personal reflection are kept in `model_card.md`.
