@@ -7,6 +7,7 @@ import logging
 import re
 
 from src.models import (CHECK_STATUSES, CRITERION_KINDS, INTENT_FACETS, MAX_CANDIDATES,
+                        MAX_CANDIDATES_PER_SOURCE,
                         MAX_JUDGED, MAX_RECOMMENDATIONS, Candidate, DiscoveryError, Evidence,
                         MusicRequest, ParsedIntent, PreferenceCheck, TasteCriterion)
 from src.utils import clean_text, normalize, safe_url
@@ -82,10 +83,24 @@ def identity_supported(candidate: Candidate, source: Evidence) -> bool:
             and normalize(candidate.title) in content and normalize(candidate.artist) in content)
 
 
+def quote_in_source(quote: str, source: Evidence) -> bool:
+    """Tell whether a quote is a verbatim passage of the source's text or of its title.
+
+    A page title such as "Calm Piano Music for Studying" is often the best evidence there is, because a
+    track list has no prose around its songs, so either one may be quoted. A quote may not join the two.
+    """
+    wanted = normalize(quote)
+    return bool(wanted) and (wanted in normalize(source.text) or wanted in normalize(source.title))
+
+
 def validate_candidates(candidates: list[Candidate], evidence: list[Evidence]) -> list[Candidate]:
-    """Keep candidates whose identity is supported by their cited sources, dropping the rest."""
+    """Keep candidates whose identity is supported by their cited sources, dropping the rest.
+
+    No single source may supply more than MAX_CANDIDATES_PER_SOURCE songs, so one long track list or
+    album page cannot crowd out the songs other sources name.
+    """
     by_id = {e.id: e for e in evidence}
-    valid, seen = [], set()
+    valid, seen, per_source = [], set(), {}
     for candidate in candidates[:MAX_CANDIDATES]:
         candidate = replace(candidate, title=clean_text(candidate.title), artist=clean_text(candidate.artist))
         key = (normalize(candidate.title), normalize(candidate.artist))
@@ -93,12 +108,18 @@ def validate_candidates(candidates: list[Candidate], evidence: list[Evidence]) -
             raise invalid_response()
         if not candidate.source_ids or any(s not in by_id for s in candidate.source_ids):
             raise invalid_response()
-        if not any(identity_supported(candidate, by_id[s]) for s in candidate.source_ids):
+        primary = next((s for s in candidate.source_ids if identity_supported(candidate, by_id[s])), None)
+        if primary is None:
             logger.info("candidate_rejected reason=identity_not_in_evidence")
             continue
-        if key not in seen:
-            seen.add(key)
-            valid.append(candidate)
+        if key in seen:
+            continue
+        if per_source.get(primary, 0) >= MAX_CANDIDATES_PER_SOURCE:
+            logger.info("candidate_rejected reason=source_over_limit")
+            continue
+        seen.add(key)
+        per_source[primary] = per_source.get(primary, 0) + 1
+        valid.append(candidate)
     return valid
 
 
@@ -123,13 +144,13 @@ def _validate_evidence_check(status, source_id, quote, rec, by_id, label):
         reason = "check_quote_empty"
     elif len(quote.split()) > 25:
         reason = "check_quote_too_long"
-    elif normalize(quote) not in normalize(by_id[source_id].text):
+    elif not quote_in_source(quote, by_id[source_id]):
         reason = "check_quote_not_in_source"
     else:
         return
     raise _Rejected(reason,
                     f"check {label}: the quote must be an exact, verbatim passage of at most 25 words from a "
-                    "web or song_card source listed in this song's source_ids; otherwise use status unknown "
+                    "web or song_card source (its text or its title) listed in this song's source_ids; otherwise use status unknown "
                     "with an empty source_id and quote")
 
 
@@ -173,7 +194,7 @@ def _check_recommendation(rec, allowed, by_id, hard, preferences):
             raise _Rejected("claim_source_not_cited",
                             f"a claim cites {claim.source_id!r}, which is missing from this song's source_ids")
         if (not claim.quote.strip() or not normalize(claim.quote)
-                or normalize(claim.quote) not in normalize(by_id[claim.source_id].text)
+                or not quote_in_source(claim.quote, by_id[claim.source_id])
                 or len(claim.quote.split()) > 25):
             raise _Rejected("claim_quote_not_in_source",
                             f"a claim quote must be an exact, verbatim passage of at most 25 words from source "

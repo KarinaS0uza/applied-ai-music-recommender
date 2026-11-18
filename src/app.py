@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from src.providers import Settings
 from src.composition import find_music
-from src.discovery import INTENT_FALLBACK_NOTICE, UNVERIFIED_WARNING_PREFIX
+from src.discovery import INTENT_FALLBACK_NOTICE, UNCHECKED_CANDIDATES_WARNING, UNVERIFIED_WARNING_PREFIX
 from src.models import DiscoveryError, DiscoveryResult, MusicRequest, ParsedIntent, TasteCriterion
 from src.utils import platform_search_links
 from src.validation import validate_request
@@ -418,10 +418,15 @@ def catalog_fallback_picks(intent) -> list:
         return []
 
 
-def show_catalog_fallback(picks) -> None:
-    """Show the catalog songs found for a request discovery could not verify on the web."""
-    st.caption("We could not verify a web recommendation, so here are songs from our local collection.")
+def show_catalog_fallback(picks, notes=()) -> None:
+    """Show the catalog songs found for a request discovery could not verify on the web.
+
+    ``notes`` are discovery warnings worth showing right above the songs they explain.
+    """
     section_heading("results-heading", "Backup picks", "From our collection")
+    st.caption("We could not verify a web recommendation, so here are songs from our local collection.")
+    for note in notes:
+        st.caption(note)
     for start in range(0, len(picks), 3):
         columns = st.columns(3, gap="medium")
         for offset, (song, match, fractions, reasons) in enumerate(picks[start:start + 3]):
@@ -728,7 +733,7 @@ def show_catalog_results(rows, matches, summary, traits=None) -> None:
     lines = "".join(f'<div class="catalog-summary-note">{escape(line)}</div>' for line in summary["lines"])
     st.markdown(
         '<div class="catalog-summary">'
-        '<div class="catalog-summary-head"><strong>Your catalog matches</strong>'
+        '<div class="catalog-summary-head"><strong>Your collection matches</strong>'
         f'<div class="catalog-summary-badge">{len(rows)} songs found</div></div>'
         f'<div class="catalog-tags">{tags}</div>{lines}</div>',
         unsafe_allow_html=True,
@@ -772,6 +777,8 @@ def show_result(result):
     video_available = (video_fallback_source(result.evidence) is not None
                        and not recommendations and not catalog_picks)
     for warning in result.warnings:
+        if warning == UNCHECKED_CANDIDATES_WARNING and catalog_picks:
+            continue  # shown with the backup picks it explains
         explains_missing_match = (
             warning.startswith("No candidate had evidence")
             or warning == "The retrieved evidence did not establish a supported recommendation."
@@ -804,7 +811,7 @@ def show_result(result):
         section_heading("results-heading", *(("Not verified", "Songs to check") if unverified
                                              else ("Made for this moment", "Fresh finds")))
     elif catalog_picks:
-        show_catalog_fallback(catalog_picks)
+        show_catalog_fallback(catalog_picks, [w for w in result.warnings if w == UNCHECKED_CANDIDATES_WARNING])
     elif not show_video_fallback(result.evidence, bool(metadata_messages)):
         st.caption("No evidence-backed matches are available for this request yet.")
     for start in range(0, len(recommendations), 3):
@@ -886,7 +893,7 @@ def main():
         section_heading("mode-heading", "Explore beyond our collection", "Discover music")
         with st.form("discovery", border=False):
             description = st.text_area("What would you like to hear?", max_chars=1200,
-                placeholder="A mood, a language, an instrument, a moment. For example: quiet piano for studying, without vocals.")
+                placeholder="A mood, a language, an instrument, a moment. For example: quiet piano for studying.")
             reference = st.text_input("Reference song and artist (optional)", max_chars=200)
             submitted = st.form_submit_button("Find music", type="primary", width="stretch")
         if submitted:

@@ -653,7 +653,7 @@ def test_failed_follow_up_check_keeps_the_result_and_warns():
     result, *_ = run_two_songs(generate, retry_invalid=True)
     assert result.unverified_requirements == ["no vocals"]
     assert all(rec.fit_score is None for rec in result.recommendations)
-    assert any("could not be checked" in warning for warning in result.warnings)
+    assert any("couldn’t check every song" in warning for warning in result.warnings)
     assert "couldn't confirm that any song meets every requirement" in result.warnings[-1]
 
 
@@ -932,6 +932,52 @@ def test_fallback_lists_at_most_the_display_limit_in_source_order_when_none_matc
     recs = run_fallback(page, songs, criterion(value="slower beats", source_text="jazz"),
                         source_title="Playlist")
     assert [rec.title for rec in recs] == [f"Song {n}" for n in range(1, MAX_RECOMMENDATIONS + 1)]
+
+
+def many_songs(count, source_id, prefix):
+    """Build a source naming ``count`` songs, and the candidates it supports."""
+    songs = [(f"{prefix} {n}", f"Artist {prefix}") for n in range(count)]
+    page = Evidence(source_id, "web", f"{prefix} list", " ".join(f"{t} by {a}." for t, a in songs),
+                    f"https://example.org/{source_id}")
+    return page, [Candidate(t, a, [source_id]) for t, a in songs]
+
+
+def test_the_model_judges_only_the_best_few_candidates_spread_over_the_sources():
+    """The model gets at most MAX_JUDGED candidates, with the sources taking turns."""
+    album, album_songs = many_songs(12, "web_1", "Lullaby")
+    chart, chart_songs = many_songs(12, "web_2", "Nocturne")
+    generate = Mock(return_value=[])
+    run(search=Mock(return_value=[album, chart]), extract=Mock(return_value=album_songs + chart_songs),
+        generate=generate)
+    sent = generate.call_args.args[2]
+    assert len(sent) == MAX_JUDGED
+    assert [c.source_ids[0] for c in sent] == ["web_1", "web_2"] * (MAX_JUDGED // 2)
+
+
+def test_candidates_tied_to_the_request_are_judged_before_songs_merely_named():
+    """A song whose evidence ties it to the request goes ahead of one a generic list merely names."""
+    page, songs = many_songs(3, "web_1", "Song")
+    songs[0] = replace(songs[0], fits_request=False)
+    generate = Mock(return_value=[])
+    run(search=Mock(return_value=[page]), extract=Mock(return_value=songs), generate=generate)
+    assert [c.title for c in generate.call_args.args[2]] == ["Song 1", "Song 2", "Song 0"]
+
+
+def test_the_follow_up_judges_the_next_batch_not_every_remaining_song():
+    """When the first batch holds nothing, the follow-up asks about the next MAX_JUDGED songs only."""
+    pages, songs = [], []
+    for n in range(3):
+        page, found = many_songs(9, f"web_{n + 1}", f"List{n}")
+        pages.append(replace(page, text=page.text + " instrumental jazz"))
+        songs += found
+    first = Evidence("web_1", "web", f"{songs[0].title} — {songs[0].artist}", pages[0].text, pages[0].url)
+    generate = Mock(side_effect=[[excluded(first)], []])
+    run(MusicRequest("jazz with no vocals"), search=Mock(return_value=pages),
+        extract=Mock(return_value=songs), generate=generate,
+        analyze=Mock(return_value=ParsedIntent([HARD], ["instrumental jazz songs"])), retry_invalid=True)
+    assert generate.call_count == 2
+    follow_up = generate.call_args_list[1].args[2]
+    assert len(follow_up) == MAX_JUDGED and songs[0] not in follow_up
 
 
 def test_fallback_cites_the_source_that_actually_identifies_the_song():

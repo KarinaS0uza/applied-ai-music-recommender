@@ -35,6 +35,9 @@ MAX_WEB_SOURCES = 16
 MAX_CANDIDATES = 30
 MAX_JUDGED = 10
 MAX_RECOMMENDATIONS = 9
+# One page may fill the display on its own, but no more, so a long track list or album page cannot crowd
+# out the songs other sources name.
+MAX_CANDIDATES_PER_SOURCE = MAX_RECOMMENDATIONS
 
 
 @dataclass(frozen=True)

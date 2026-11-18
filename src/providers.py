@@ -516,19 +516,28 @@ class GeminiProvider:
 
     def analyze_request(self, request):
         """Ask Gemini to turn the request into taste criteria and search queries."""
-        data = self._json("""Analyze the listener's request before retrieval. Return up to 20 criteria
-using only meaning present in the description or reference. Use must_have or must_avoid only for an
-explicit requirement or exclusion such as must, only, no, without, required, a language-only request,
-or a requested recording version. Vocal requirements and exclusions such as clean singing,
-instrumental, no vocals and no screaming are always explicit: use must_have or must_avoid for them,
-never preference. Treat mood, energy and activity fit as preferences unless the user
-explicitly makes them mandatory. Weight preferences from 1 to 3; words such as very or most important
-increase weight. source_text must be a short verbatim substring of the request or reference. You may
-infer a closely entailed preference, such as low energy from very peaceful, but its source_text must
-still quote the user's words. Produce one or two concise music-search queries without filler such as
-'I want', and add helpful synonyms while preserving all hard criteria. Phrase each query to find
-list pages that name many specific songs, such as 'best ... songs of all time', 'essential ... songs'
-or 'top ... songs'. Do not ask for artists or albums: those pages name few songs. Avoid words that mostly return streams, mixes, playlists or radio
+        data = self._json("""Analyze the listener's request before retrieval and commit to a clear reading of
+what they want to hear and why. Return up to 20 criteria, each a concrete trait that a recommended song
+can later be checked against and explained by (for example instrument piano, energy low, activity
+studying), phrased as the trait itself and not as a vague wish. Cover every facet the request touches:
+genre, instrument, mood, energy, activity, vocals, language, era, version and reference. Do not hedge
+or skip a trait because it is only implied: when the request clearly entails one, such as low energy and
+a calm mood from "studying" or "peaceful", or instrumental-leaning from "piano music", return it as a
+preference, and give the traits the listener stressed a higher weight. Never invent tastes the request
+does not support, and never return two criteria with the same facet and value. Use must_have or
+must_avoid only for an explicit requirement or exclusion such as must, only, no, without, required, a
+language-only request, or a requested recording version. Vocal requirements and exclusions such as
+clean singing, instrumental, no vocals and no screaming are always explicit: use must_have or
+must_avoid for them, never preference. Treat mood, energy and activity fit as preferences unless the user explicitly
+makes them mandatory. An instrument named only as the kind of music wanted, such as "piano music", is a
+preference too: it is a hard criterion only when the user says must, only, no or without. Weight preferences from 1 to 3; words such as very or most important increase
+weight. source_text must be a short verbatim substring of the request or reference, and an inferred
+criterion must still quote the user's own words that entail it. Produce one or two concise
+music-search queries without filler such as 'I want'. Make each query specific by combining the
+listener's strongest traits (genre or instrument, mood, activity) and add helpful synonyms while
+preserving all hard criteria. Phrase each query to find list pages that name many specific songs, such
+as 'best ... songs of all time', 'essential ... songs' or 'top ... songs'. Do not ask for artists or
+albums: those pages name few songs. Avoid words that mostly return streams, mixes, playlists or radio
 channels, such as 'beats', 'mix', 'playlist', 'radio', '24/7' or 'to study to'. Never include URLs.""",
             {"request": asdict(request)}, _INTENT_SCHEMA)
         try:
@@ -542,7 +551,7 @@ channels, such as 'beats', 'mix', 'playlist', 'radio', '24/7' or 'to study to'. 
             for row in rows:
                 criterion = TasteCriterion(text_field(row["facet"], 30), text_field(row["kind"], 20),
                     text_field(row["value"], 100), row["weight"], text_field(row["source_text"], 200))
-                if (criterion.facet in {"mood", "energy", "activity"}
+                if (criterion.facet in {"mood", "energy", "activity", "instrument"}
                         and criterion.kind != "preference" and not mandatory.search(criterion.source_text)):
                     criterion = replace(criterion, kind="preference")
                 criteria.append(criterion)
@@ -553,16 +562,25 @@ channels, such as 'beats', 'mix', 'playlist', 'radio', '24/7' or 'to study to'. 
 
     def extract_candidates(self, request, intent, evidence):
         """Ask Gemini for song and artist pairs that the evidence names together."""
-        data = self._json("""Extract up to 30 relevant real song/artist pairs explicitly named together in
-web or song_card evidence. Cite only sources establishing that identity. Do not turn a work's composer
-into its performer; if no performer is established, skip the candidate. A reference is context, not
-evidence for new facts. Do not return albums, playlists, applications, labels or recording studios as
-songs. Mark those entity_type not_song. Prefer identities from evidence that overlaps the analyzed intent. For each song set fits_request: true
-only when the cited evidence ties it to what the request asks for (for example the genre or mood the
-listener named), and false when the evidence merely names it, such as in a generic list that is not about
-that request. Judge from the evidence, not from memory. Return as many fitting songs as the evidence supports.
-When two sources are equally relevant, prefer the music-specialist source. A specialist domain alone is
-not proof that a song identity or characteristic is correct.""",
+        data = self._json("""Extract up to 30 real song/artist pairs that web or song_card evidence names together,
+taking at most 9 from any one source so several sources are represented. Be thorough: read every
+source in full (lists, tracklists, articles, reviews, snippets and titles) and return every pair you
+find, not just the first few or the most famous. Recognise common formats such as "Artist - Title",
+"Title by Artist", "Title (Artist)", numbered or bulleted lists, and "Artist's Title". Count a
+featured or guest artist as a performer, and accept a cover or live version when the evidence names
+its performer. Cite only the sources that establish that title and artist together. For classical
+and other instrumental works, the composer may be used as the artist when the evidence names no
+performer. Otherwise do not turn a work's composer, writer or producer into its performer; if no
+artist is established, skip the candidate. Never use the song title as the artist. A reference is context, not evidence for new facts. Do not return albums, playlists,
+applications, labels or recording studios as songs; mark those entity_type not_song. Prefer
+identities from evidence that overlaps the analyzed intent, but still include other well-formed pairs
+so that nothing relevant is missed. For each song set fits_request: true when the cited evidence ties
+it to what the request asks for (for example the genre, mood or scene the listener named), including
+when it appears in a list or article about that request, and false when the evidence merely names it
+in passing, such as in an unrelated or generic list. Judge from the evidence, not from memory. Fill the
+30 slots with fitting songs whenever the evidence supports them. When two sources are equally
+relevant, prefer the music-specialist source. A specialist domain alone is not proof that a song
+identity or characteristic is correct.""",
             {"request": asdict(request), "intent": asdict(intent),
              "evidence": [asdict(e) for e in evidence]}, _CANDIDATE_SCHEMA)
         try:
@@ -590,8 +608,10 @@ not proof that a song identity or characteristic is correct.""",
         criteria = [{"id": criterion_key(criterion), **asdict(criterion)} for criterion in intent.criteria]
         payload = {"request": asdict(request), "criteria": criteria,
                    "candidates": [asdict(c) for c in candidates], "evidence": [asdict(e) for e in evidence]}
-        task = """Evaluate up to ten supplied candidates using only the evidence. Return the
-best evidence-backed candidates, including partial preference matches so application code can rank them.
+        task = """Evaluate every supplied candidate (there are at most ten) using only the evidence. Return one
+entry for each candidate, including partial preference matches so application code can rank them; omit a
+candidate only when no source says anything about it. A source's title may be quoted as evidence as well
+as its text.
 Explain fit in concise prose using only cited facts, and name unknown requested traits in uncertainties.
 Each factual assertion needs a claims entry with a short verbatim supporting quote of at most 25 words.
 For every must_have or must_avoid criterion, include one constraint_check whose constraint is the supplied

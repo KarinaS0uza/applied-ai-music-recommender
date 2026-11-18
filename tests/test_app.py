@@ -215,12 +215,34 @@ def test_empty_discovery_recommends_csv_catalog_songs_as_the_first_fallback(app)
     assert "COLLECTION FALLBACK 01" in rendered and "COLLECTION FALLBACK 05" in rendered
     assert "From our collection" in rendered and "Backup picks" in rendered
     assert "Sunrise City" in rendered
+
     assert "Neon Echo" in rendered
     assert "MATCH SCORE" in rendered
     assert "Why it fits" in rendered
     assert re.search(r"Energy similarity \d+%", rendered)
     assert "songs from our local collection" in rendered
     assert "RELATED VIDEO" not in rendered  # the catalog comes before the video
+    assert not app.exception
+
+
+def test_unchecked_candidates_note_sits_between_backup_heading_and_songs(app):
+    """The unchecked-candidates note is shown under the Backup picks heading, not as a top warning."""
+    from src.discovery import UNCHECKED_CANDIDATES_WARNING
+    intent = ParsedIntent([TasteCriterion("genre", "preference", "pop", 2, "pop")], ["pop"])
+    result = DiscoveryResult([], [], [UNCHECKED_CANDIDATES_WARNING], intent)
+    with patch("src.composition.find_music", return_value=result):
+        submit(app, "happy pop")
+    assert not [w for w in app.warning if UNCHECKED_CANDIDATES_WARNING in w.value]
+
+    def in_order(block):
+        for child in block:
+            if hasattr(child, "children"):
+                yield from in_order(child.children.values())
+            elif isinstance(getattr(child, "value", None), str):
+                yield child.value
+
+    text = "\n".join(in_order(app.main))
+    assert text.index("Backup picks") < text.index(UNCHECKED_CANDIDATES_WARNING) < text.index("COLLECTION FALLBACK 01")
     assert not app.exception
 
 

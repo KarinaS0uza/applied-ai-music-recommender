@@ -7,7 +7,7 @@ import logging
 import re
 import time
 
-from src.models import (MAX_RECOMMENDATIONS, MAX_WEB_SOURCES, Candidate, DiscoveryError,
+from src.models import (MAX_JUDGED, MAX_RECOMMENDATIONS, MAX_WEB_SOURCES, Candidate, DiscoveryError,
                         DiscoveryResult, Evidence, MusicRequest, ParsedIntent, Recommendation,
                         SupportedClaim)
 from src.utils import clean_excerpt, normalize, safe_url
@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 # Shown as a soft note rather than a warning: results are still usable.
 UNVERIFIED_WARNING_PREFIX = "We couldn't confirm that any song meets every requirement"
+UNCHECKED_CANDIDATES_WARNING = ("We couldn’t check every song we found against your request, "
+                                "so some results may be missing.")
 INTENT_FALLBACK_NOTICE = ("We couldn’t fully interpret the details of your request, "
                           "so we searched using your exact words instead.")
 
@@ -157,6 +159,33 @@ def _source_identified(candidates, evidence, intent, skip=frozenset(), limit=MAX
     return [rec for _, _, rec in sorted(ranked, key=lambda row: row[:2])[:limit]]
 
 
+def _judging_order(candidates, evidence):
+    """Order candidates so the first few are the best ones to judge: songs tied to the request, spread over sources.
+
+    Songs the model judged as fitting the request come first. Within each group the sources take turns,
+    so one long track list or album page cannot fill the whole batch the model judges.
+    """
+    by_id = {item.id: item for item in evidence}
+
+    def source_of(candidate):
+        return next((source_id for source_id in candidate.source_ids
+                     if source_id in by_id and identity_supported(candidate, by_id[source_id])),
+                    candidate.source_ids[0])
+
+    ordered = []
+    for fits in (True, False):
+        queues = {}
+        for candidate in candidates:
+            if bool(candidate.fits_request) == fits:
+                queues.setdefault(source_of(candidate), []).append(candidate)
+        while queues:
+            for source in list(queues):
+                ordered.append(queues[source].pop(0))
+                if not queues[source]:
+                    del queues[source]
+    return ordered
+
+
 def _fallback_recommendations(candidates, evidence, intent):
     """Return only source-identified songs when generated recommendation details are invalid.
 
@@ -248,6 +277,7 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
     if not candidates:
         return DiscoveryResult([], evidence, warnings + [
             "Sources were found, but no song and artist identities could be verified."], intent)
+    candidates = _judging_order(candidates, evidence)
     if request.enhanced and metadata:
         try:
             checked_candidates = candidates[:5]
@@ -281,7 +311,9 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
         """Generate recommendations, optionally with repair feedback, and validate them against the evidence."""
         # The first call is unchanged; a retry also tells the model which checks failed.
         extra = {"feedback": feedback} if feedback else {}
-        generated = generate(request, intent, candidates, evidence, **extra)
+        # Judging all the candidates at once lets the model answer for just its favorite, so it judges
+        # the best few; the follow-up below covers the next few if none of these hold up.
+        generated = generate(request, intent, candidates[:MAX_JUDGED], evidence, **extra)
         record_verdicts(generated)
         return validate_recommendations(generated, candidates, evidence, intent)
 
@@ -300,12 +332,12 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
         logger.info("generation_follow_up stage=recommendations judged=%d skipped=%d",
                     len(candidates) - len(skipped), len(skipped))
         try:
-            generated = generate(request, intent, skipped, evidence)
+            generated = generate(request, intent, skipped[:MAX_JUDGED], evidence)
             record_verdicts(generated)
             recommendations = validate_recommendations(generated, skipped, evidence, intent)
         except DiscoveryError as error:
             logger.warning("generation_follow_up_failed code=%s", error.code)
-            warnings.append("Some candidates could not be checked against your request.")
+            warnings.append(UNCHECKED_CANDIDATES_WARNING)
     if not intent.hard_criteria and len(recommendations) < MAX_RECOMMENDATIONS:
         # A broad request ("rock") has dozens of valid answers, but the model only judges a few
         # candidates and strict checks drop some of those. The other songs the sources name are still

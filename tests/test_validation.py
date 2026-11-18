@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.models import (MAX_CANDIDATES, MAX_JUDGED, MAX_RECOMMENDATIONS, Candidate, ConstraintCheck, DiscoveryError, Evidence, MusicRequest,
+from src.models import (MAX_CANDIDATES, MAX_CANDIDATES_PER_SOURCE, MAX_JUDGED, MAX_RECOMMENDATIONS, Candidate, ConstraintCheck, DiscoveryError, Evidence, MusicRequest,
                         ParsedIntent, PreferenceCheck, Recommendation, SupportedClaim, TasteCriterion)
 from src.validation import (criterion_key, identity_supported, validate_candidates,
                             validate_parsed_intent, validate_recommendations, validate_request)
@@ -195,10 +195,38 @@ def test_duplicate_identities_are_collapsed_ignoring_case_and_punctuation():
 def test_only_the_first_max_candidates_are_considered():
     """Only the first MAX_CANDIDATES candidates are considered."""
     total = MAX_CANDIDATES + 2
-    page = web(text=" ".join(f"Song {n} by Artist {n}." for n in range(total)))
-    candidates = [Candidate(f"Song {n}", f"Artist {n}", ["web_1"]) for n in range(total)]
-    assert ([c.title for c in validate_candidates(candidates, [page])]
+    pages = [web(id=f"web_{n}", text=f"Song {n} by Artist {n}.") for n in range(total)]
+    candidates = [Candidate(f"Song {n}", f"Artist {n}", [f"web_{n}"]) for n in range(total)]
+    assert ([c.title for c in validate_candidates(candidates, pages)]
             == [f"Song {n}" for n in range(MAX_CANDIDATES)])
+
+
+def test_one_source_cannot_supply_more_than_its_share_of_candidates():
+    """One long track list keeps only MAX_CANDIDATES_PER_SOURCE songs, so other sources still fit."""
+    total = MAX_CANDIDATES_PER_SOURCE + 3
+    long_page = web(text=" ".join(f"Song {n} by Artist {n}." for n in range(total)))
+    other = web(id="web_2", text="Nocturne by Chopin.")
+    candidates = ([Candidate(f"Song {n}", f"Artist {n}", ["web_1"]) for n in range(total)]
+                  + [Candidate("Nocturne", "Chopin", ["web_2"])])
+    kept = [c.title for c in validate_candidates(candidates, [long_page, other])]
+    assert kept == [f"Song {n}" for n in range(MAX_CANDIDATES_PER_SOURCE)] + ["Nocturne"]
+
+
+def test_a_check_or_claim_may_quote_the_source_title():
+    """A page title such as "Calm Piano Music for Studying" is quotable evidence, like its text."""
+    page = web(title="Take Five: calm music for studying", text="Take Five by Dave Brubeck Quartet.")
+    title_claim = SupportedClaim("A calm study song", "web_1", "calm music for studying")
+    kept = keep([rec(claims=[title_claim], preference_checks=[pref_check(quote="calm music for studying")])],
+                [page], ParsedIntent([PREF], ["calm jazz"]))
+    assert [r.title for r in kept] == ["Take Five"]
+
+
+def test_a_quote_may_not_join_the_title_and_the_text():
+    """A quote that runs from the title into the text is not a verbatim passage of either."""
+    page = web(title="calm music for studying", text="Take Five by Dave Brubeck Quartet.")
+    joined = SupportedClaim("Joined", "web_1", "studying Take Five")
+    with pytest.raises(DiscoveryError):
+        keep([rec(claims=[joined])], [page])
 
 
 @pytest.mark.parametrize("candidate", [
