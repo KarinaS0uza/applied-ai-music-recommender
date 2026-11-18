@@ -1,0 +1,743 @@
+{
+  "schema_version": 1,
+  "_comment": "Read by src/knowledge.py: each entry in cards becomes one retrievable song_card source.",
+  "collection_note": "Source-backed paraphrases prepared from the linked pages. Version and unknown fields constrain claims. Not audio analysis. Wikipedia summaries are available under CC BY-SA 4.0; see data/knowledge/SOURCES.md.",
+  "cards": [
+    {
+      "id": "take-five",
+      "title": "Take Five",
+      "artist": "Dave Brubeck Quartet",
+      "version": "Time Out album recording (1959)",
+      "language": "unknown",
+      "description": "Cool jazz in five-beat meter, composed by Paul Desmond; the quartet credits piano, alto saxophone, upright bass and drums.",
+      "tags": [
+        "jazz",
+        "saxophone",
+        "piano",
+        "drums"
+      ],
+      "sources": [
+        {
+          "title": "Take Five",
+          "url": "https://en.wikipedia.org/wiki/Take_Five",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "so-what",
+      "title": "So What",
+      "artist": "Miles Davis",
+      "version": "Kind of Blue studio recording (1959)",
+      "language": "unknown",
+      "description": "Modal jazz with a piano-and-bass introduction. The studio recording has a moderate pace; later live performances are faster.",
+      "tags": [
+        "jazz",
+        "modal",
+        "piano",
+        "bass"
+      ],
+      "sources": [
+        {
+          "title": "So What (Miles Davis composition)",
+          "url": "https://en.wikipedia.org/wiki/So_What_(Miles_Davis_composition)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "around-the-world",
+      "title": "Around the World",
+      "artist": "Daft Punk",
+      "version": "Homework album version (1997)",
+      "language": "English",
+      "description": "French house with funk and disco elements, a repeating bassline and robotic vocals repeating an English phrase.",
+      "tags": [
+        "electronic",
+        "house",
+        "dance",
+        "bass",
+        "robotic vocal"
+      ],
+      "sources": [
+        {
+          "title": "Around the World (Daft Punk song)",
+          "url": "https://en.wikipedia.org/wiki/Around_the_World_(Daft_Punk_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "born-slippy",
+      "title": "Born Slippy .NUXX",
+      "artist": "Underworld",
+      "version": "Original .NUXX recording, not Born Slippy instrumental (1995)",
+      "language": "unknown",
+      "description": "Electronic techno track with fragmented lyrics about alcoholism. The similarly named Born Slippy and the later T2 version are distinct.",
+      "tags": [
+        "electronic",
+        "techno",
+        "dance",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Born Slippy .NUXX",
+          "url": "https://en.wikipedia.org/wiki/Born_Slippy_.NUXX",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "fast-car",
+      "title": "Fast Car",
+      "artist": "Tracy Chapman",
+      "version": "Tracy Chapman original studio recording (1988)",
+      "language": "unknown",
+      "description": "Folk rock and folk-pop recording from Chapman's debut album. Later country and electronic dance covers have different performers and arrangements.",
+      "tags": [
+        "folk rock",
+        "folk pop",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Fast Car",
+          "url": "https://en.wikipedia.org/wiki/Fast_Car",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "respect",
+      "title": "Respect",
+      "artist": "Aretha Franklin",
+      "version": "Aretha Franklin cover (1967), not Otis Redding original",
+      "language": "unknown",
+      "description": "Soul and rhythm-and-blues interpretation of Otis Redding's song; Franklin changed the arrangement and phrasing.",
+      "tags": [
+        "soul",
+        "rhythm and blues",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Respect (song)",
+          "url": "https://en.wikipedia.org/wiki/Respect_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "jolene",
+      "title": "Jolene",
+      "artist": "Dolly Parton",
+      "version": "Original studio recording, released 1973",
+      "language": "unknown",
+      "description": "Country recording written and sung by Dolly Parton, telling of a narrator asking another woman not to take her partner.",
+      "tags": [
+        "country",
+        "vocal",
+        "storytelling"
+      ],
+      "sources": [
+        {
+          "title": "Jolene (song)",
+          "url": "https://en.wikipedia.org/wiki/Jolene_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "nothing-else-matters",
+      "title": "Nothing Else Matters",
+      "artist": "Metallica",
+      "version": "Metallica studio album recording (1991)",
+      "language": "unknown",
+      "description": "Power ballad by Metallica, released as a single in 1992. The ballad label alone does not establish clean singing or absence of screaming.",
+      "tags": [
+        "rock",
+        "ballad",
+        "metal"
+      ],
+      "sources": [
+        {
+          "title": "Nothing Else Matters",
+          "url": "https://en.wikipedia.org/wiki/Nothing_Else_Matters",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "aguas",
+      "title": "Águas de Março",
+      "artist": "Elis Regina and Antonio Carlos Jobim",
+      "version": "Elis & Tom duet (1974)",
+      "language": "Portuguese",
+      "description": "Portuguese bossa nova song by Jobim, recorded as a duet with Elis Regina for Elis & Tom; its imagery concerns March rains.",
+      "tags": [
+        "bossa nova",
+        "duet",
+        "Portuguese",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Waters of March",
+          "url": "https://en.wikipedia.org/wiki/Waters_of_March",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "mas-que-nada",
+      "title": "Mas que nada",
+      "artist": "Jorge Ben",
+      "version": "Samba Esquema Novo recording (1963)",
+      "language": "Portuguese",
+      "description": "Portuguese samba, samba rock and bossa nova recording by Jorge Ben. Other artists' versions and the earlier Zé Maria recording are distinct.",
+      "tags": [
+        "samba",
+        "samba rock",
+        "Portuguese",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Mas que Nada",
+          "url": "https://en.wikipedia.org/wiki/Mas_que_Nada",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "despacito",
+      "title": "Despacito",
+      "artist": "Luis Fonsi featuring Daddy Yankee",
+      "version": "Original Spanish single (2017), not Bieber remix",
+      "language": "Spanish",
+      "description": "Spanish-language reggaeton and Latin pop song featuring Fonsi's singing and Daddy Yankee's rap.",
+      "tags": [
+        "reggaeton",
+        "Latin pop",
+        "Spanish",
+        "rap",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Despacito",
+          "url": "https://en.wikipedia.org/wiki/Despacito",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "chan-chan",
+      "title": "Chan Chan",
+      "artist": "Buena Vista Social Club",
+      "version": "Buena Vista Social Club album recording, recorded 1996",
+      "language": "unknown",
+      "description": "Son cubano composition by Compay Segundo; the ensemble's album opens with this recording, distinct from Segundo's earlier versions.",
+      "tags": [
+        "son cubano",
+        "Cuban",
+        "ensemble"
+      ],
+      "sources": [
+        {
+          "title": "Chan Chan (song)",
+          "url": "https://en.wikipedia.org/wiki/Chan_Chan_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "sodade",
+      "title": "Sodade",
+      "artist": "Cesária Évora",
+      "version": "Miss Perfumado recording (1992)",
+      "language": "Cape Verdean Creole",
+      "description": "Morna sung in Cape Verdean Creole, associated with longing and emigrant nostalgia. Creole should not be labeled Portuguese.",
+      "tags": [
+        "morna",
+        "longing",
+        "vocal",
+        "Cape Verdean Creole"
+      ],
+      "sources": [
+        {
+          "title": "Sodade",
+          "url": "https://en.wikipedia.org/wiki/Sodade",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "didi",
+      "title": "Didi",
+      "artist": "Khaled",
+      "version": "Khaled album recording (1992)",
+      "language": "Algerian Arabic",
+      "description": "Raï song written and performed by Khaled, sung in Algerian Arabic; the single edit and album version have different lengths.",
+      "tags": [
+        "rai",
+        "raï",
+        "Arabic",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Didi (song)",
+          "url": "https://en.wikipedia.org/wiki/Didi_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "gee",
+      "title": "Gee",
+      "artist": "Girls' Generation",
+      "version": "Original Korean version (2009), not Japanese version (2010)",
+      "language": "Korean",
+      "description": "Korean-language bubblegum electropop by Girls' Generation; a later Japanese-language version exists.",
+      "tags": [
+        "K-pop",
+        "electropop",
+        "bubblegum",
+        "Korean",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Gee (Girls%27 Generation song)",
+          "url": "https://en.wikipedia.org/wiki/Gee_(Girls%27_Generation_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "sukiyaki",
+      "title": "Sukiyaki",
+      "artist": "Kyu Sakamoto",
+      "version": "Ue o Muite Arukō original (1961)",
+      "language": "Japanese",
+      "description": "Japanese kayōkyoku and orchestral pop, sung by Kyu Sakamoto; the lyrics concern walking while holding back tears.",
+      "tags": [
+        "Japanese",
+        "orchestral pop",
+        "vocal",
+        "crooner"
+      ],
+      "sources": [
+        {
+          "title": "Sukiyaki (song)",
+          "url": "https://en.wikipedia.org/wiki/Sukiyaki_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "river-flows",
+      "title": "River Flows in You",
+      "artist": "Yiruma",
+      "version": "First Love album recording (2001)",
+      "language": "unknown",
+      "description": "Track from pianist Yiruma's First Love album, listed fourth on the album. This source does not establish a precise tempo or a study benefit.",
+      "tags": [
+        "piano",
+        "classical crossover"
+      ],
+      "sources": [
+        {
+          "title": "River Flows in You",
+          "url": "https://en.wikipedia.org/wiki/River_Flows_in_You",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "nuvole",
+      "title": "Nuvole bianche",
+      "artist": "Ludovico Einaudi",
+      "version": "Una mattina album recording (2004)",
+      "language": "unknown",
+      "description": "Track twelve on pianist Ludovico Einaudi's contemporary classical album Una mattina. Recording-specific vocal status is not established here.",
+      "tags": [
+        "piano",
+        "contemporary classical"
+      ],
+      "sources": [
+        {
+          "title": "Una Mattina",
+          "url": "https://en.wikipedia.org/wiki/Una_Mattina",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "ascent",
+      "title": "An Ending (Ascent)",
+      "artist": "Brian Eno",
+      "version": "Apollo: Atmospheres and Soundtracks recording (1983)",
+      "language": "unknown",
+      "description": "Smooth electronic piece from the ambient album Apollo: Atmospheres and Soundtracks; do not transfer the pedal-steel credits of other tracks to it.",
+      "tags": [
+        "ambient",
+        "electronic",
+        "smooth"
+      ],
+      "sources": [
+        {
+          "title": "An Ending (Ascent)",
+          "url": "https://en.wikipedia.org/wiki/An_Ending_(Ascent)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "paper-planes",
+      "title": "Paper Planes",
+      "artist": "M.I.A.",
+      "version": "Kala album recording (2007)",
+      "language": "unknown",
+      "description": "Downtempo alternative hip hop and pop sampling the Clash; lyrics satirize perceptions of immigrants. Includes gunshot sound effects.",
+      "tags": [
+        "hip hop",
+        "downtempo",
+        "pop",
+        "sampling"
+      ],
+      "sources": [
+        {
+          "title": "Paper Planes (M.I.A. song)",
+          "url": "https://en.wikipedia.org/wiki/Paper_Planes_(M.I.A._song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "teen-spirit",
+      "title": "Smells Like Teen Spirit",
+      "artist": "Nirvana",
+      "version": "Nevermind studio recording (1991)",
+      "language": "unknown",
+      "description": "Grunge and alternative rock shaped by quiet-to-loud dynamics inspired by the Pixies. A clean-singing-only request needs more specific vocal evidence.",
+      "tags": [
+        "grunge",
+        "alternative rock",
+        "guitar",
+        "dynamic"
+      ],
+      "sources": [
+        {
+          "title": "Smells Like Teen Spirit",
+          "url": "https://en.wikipedia.org/wiki/Smells_Like_Teen_Spirit",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "du-hast",
+      "title": "Du hast",
+      "artist": "Rammstein",
+      "version": "Original German version on Sehnsucht (1997)",
+      "language": "German",
+      "description": "Industrial metal / Neue Deutsche Härte with a guitar riff and synthesizer sequence; a partially English version is a different recording.",
+      "tags": [
+        "industrial metal",
+        "guitar",
+        "synthesizer",
+        "German"
+      ],
+      "sources": [
+        {
+          "title": "Du hast",
+          "url": "https://en.wikipedia.org/wiki/Du_hast",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "superstition",
+      "title": "Superstition",
+      "artist": "Stevie Wonder",
+      "version": "Talking Book studio recording (1972)",
+      "language": "unknown",
+      "description": "Funk and soul with a clavinet riff, synthesizer bass, trumpet and tenor saxophone. The source discusses uncertainty about the final drum performance credit.",
+      "tags": [
+        "funk",
+        "soul",
+        "clavinet",
+        "bass",
+        "trumpet",
+        "saxophone"
+      ],
+      "sources": [
+        {
+          "title": "Superstition (song)",
+          "url": "https://en.wikipedia.org/wiki/Superstition_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "teardrop",
+      "title": "Teardrop",
+      "artist": "Massive Attack",
+      "version": "Mezzanine studio recording (1998)",
+      "language": "unknown",
+      "description": "Trip hop with a harpsichord-led arrangement and Elizabeth Fraser on vocals; the source describes her ethereal style and the mournful melody.",
+      "tags": [
+        "trip hop",
+        "harpsichord",
+        "ethereal",
+        "mournful",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Teardrop (song)",
+          "url": "https://en.wikipedia.org/wiki/Teardrop_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "merry-christmas",
+      "title": "Merry Christmas Mr. Lawrence",
+      "artist": "Ryuichi Sakamoto",
+      "version": "Playing the Piano solo-piano version (2009), not soundtrack or vocal adaptation",
+      "language": "instrumental",
+      "description": "Solo piano arrangement on Playing the Piano, an entirely instrumental album of Sakamoto performing his own earlier compositions. No vocals on this album version.",
+      "tags": [
+        "piano",
+        "solo",
+        "instrumental",
+        "soundtrack"
+      ],
+      "sources": [
+        {
+          "title": "Playing the Piano",
+          "url": "https://en.wikipedia.org/wiki/Playing_the_Piano",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit"
+      ]
+    },
+    {
+      "id": "miss-clare",
+      "title": "Miss Clare Remembers",
+      "artist": "Enya",
+      "version": "Watermark album version (1988)",
+      "language": "instrumental",
+      "description": "Piano instrumental on Watermark. The production team experimented with vocals but chose to leave them out of this track.",
+      "tags": [
+        "piano",
+        "instrumental",
+        "new age"
+      ],
+      "sources": [
+        {
+          "title": "Watermark (Enya album)",
+          "url": "https://en.wikipedia.org/wiki/Watermark_(Enya_album)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-11",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit"
+      ]
+    }
+  ]
+}

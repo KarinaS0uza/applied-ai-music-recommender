@@ -1,0 +1,32 @@
+flowchart TD
+    Strategy["User selects --strategy"] --> Scoring["Score preferences and record reasons"]
+    Profiles["Four hardcoded preference profiles"] --> Scoring
+    Catalog["data/songs.csv"] --> Loader["load_songs: parse catalog metadata"]
+    Loader --> Scoring
+    Scoring --> Selection["recommend_songs: select top five with diversity penalties"]
+    Selection --> Output["Terminal tables: songs, scores and rule-based reasons"]
+
+    %% Existing development test, run separately from the application.
+    Tests["pytest: repeated-artist penalty test"] -.->|"Checks ranking and penalty reason"| Selection
+
+    UI["CLI query or Streamlit form"] -->|"CSV mode"| Scoring
+    UI -->|"Description and optional reference"| RAG["discovery.py: shared discovery workflow"]
+    RAG --> Intent["Gemini: analyze criteria and focused queries"]
+    Intent --> Web["Tavily: bounded, relevance-filtered searches"]
+    RAG -->|"Enhanced mode"| Docs["Retrieve up to four cards and two guide sections"]
+    Web --> Extract["Gemini: extract supported candidates"]
+    Docs --> Extract
+    Extract -->|"Enhanced mode"| Metadata["MusicBrainz: recording identities and versions"]
+    Extract --> Generate["Gemini: evidence-grounded selection"]
+    Metadata --> Generate
+    Generate --> Validate["Validate evidence and score weighted preferences"]
+    Validate --> Results["Up to five exact or partial matches with uncertainties"]
+    Results --> Human["Listener reviews excerpts and original sources"]
+    Checks["pytest: controlled pipeline, provider and UI checks"] -.-> Validate
+    Review["Recorded six-request retrieval comparison"] -.-> Docs
+
+    Validate -->|"Invalid model output"| Degrade["Retry once, then warn and keep only source-identified songs"]
+    Degrade --> Results
+    Results -->|"No supported match"| Fallback["Related video from retrieved sources, else one CSV catalog pick"]
+    Fallback --> Human
+    Guard["Input checks, call limits, timeouts, safe errors"] -.-> RAG

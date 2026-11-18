@@ -1,3 +1,5 @@
+# Behavior: keeps caches, virtualenvs, local-only files and private provider keys out of git.
+
 # Byte compiled
 __pycache__/
 *.py[cod]
@@ -13,3 +15,12 @@ venv/
 
 # Pytest cache
 .pytest_cache/
+
+# Local-only files
+.planning/
+
+# Private provider configuration
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml

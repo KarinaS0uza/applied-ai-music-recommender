@@ -1,0 +1,27 @@
+# Streamlit theme for the music discovery app, with light and dark color schemes.
+[theme]
+primaryColor = "#0A84FF"
+font = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", sans-serif'
+baseFontSize = 16
+baseRadius = "0.75rem"
+buttonRadius = "0.75rem"
+headingFontSizes = ["2.5rem", "1.65rem", "1.2rem"]
+headingFontWeights = [650, 600, 600]
+
+[theme.light]
+backgroundColor = "#F5F5F7"
+secondaryBackgroundColor = "#FFFFFF"
+textColor = "#1D1D1F"
+borderColor = "#D6D6DB"
+dataframeBorderColor = "#D6D6DB"
+dataframeHeaderBackgroundColor = "#EBEBEF"
+dataframeHeaderTextColor = "#1D1D1F"
+
+[theme.dark]
+backgroundColor = "#111113"
+secondaryBackgroundColor = "#1C1C1E"
+textColor = "#F5F5F7"
+borderColor = "#3A3A3C"
+dataframeBorderColor = "#3A3A3C"
+dataframeHeaderBackgroundColor = "#252528"
+dataframeHeaderTextColor = "#F5F5F7"

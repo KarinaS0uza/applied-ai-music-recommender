@@ -1,12 +1,16 @@
 # AI Interactions Log
 
-> **Stretch features only.** Only fill in the sections that apply to stretch features you attempted. If you did not attempt a stretch feature, leave its section blank or delete it. This file is not required for the core project.
+<!-- Behavior: records how an AI coding assistant was used on the original recommender. -->
+
+Examples of working with an AI coding assistant on the original recommender.
+
+The retrieval-augmented discovery extension is not logged prompt by prompt here.
+How I worked with the assistant on it, including a suggestion I accepted and one I
+changed, is written up in [model_card.md](model_card.md#14-collaboration-with-ai).
 
 ---
 
-## Agentic Workflow (SF8)
-
-> Document your experience using an AI agent (e.g., Cursor Agent, Claude, Copilot) to make multi-step changes autonomously.
+## Agentic Workflow
 
 **What task did you give the agent?**
 
@@ -58,9 +62,7 @@ confirmed and still need review. I did not run the automated test suite.
 
 ---
 
-## Design Pattern (SF10)
-
-> Document how AI helped you choose or implement a design pattern.
+## Design Pattern
 
 **Which design pattern did you use?**
 
@@ -85,7 +87,7 @@ choose one with `--strategy`.
 
 ---
 
-## Diversity Penalty (SF11)
+## Diversity Penalty
 
 **Prompt used:**
 
@@ -111,7 +113,7 @@ suite.
 
 ---
 
-## Visual Summary Table (SF12)
+## Visual Summary Table
 
 **Prompt used:**
 
