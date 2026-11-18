@@ -1,0 +1,38 @@
+{
+  "_comment": "Fixture for tests/test_providers.py: sample request wordings and the parsed intent each should produce.",
+  "cases": [
+    {
+      "id": "happy-peaceful",
+      "description": "I want a happy song but very peaceful",
+      "intent": {
+        "criteria": [
+          {
+            "facet": "mood",
+            "kind": "preference",
+            "value": "happy",
+            "weight": 2,
+            "source_text": "happy"
+          },
+          {
+            "facet": "mood",
+            "kind": "preference",
+            "value": "peaceful",
+            "weight": 3,
+            "source_text": "very peaceful"
+          },
+          {
+            "facet": "energy",
+            "kind": "preference",
+            "value": "low",
+            "weight": 2,
+            "source_text": "very peaceful"
+          }
+        ],
+        "search_queries": [
+          "happy peaceful songs",
+          "gentle uplifting low-energy songs"
+        ]
+      }
+    }
+  ]
+}
