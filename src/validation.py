@@ -9,7 +9,7 @@ import re
 from src.models import (CHECK_STATUSES, CRITERION_KINDS, INTENT_FACETS, Candidate,
                         DiscoveryError, Evidence, MusicRequest, ParsedIntent,
                         TasteCriterion)
-from src.utils import normalize, safe_url
+from src.utils import clean_text, normalize, safe_url
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +87,7 @@ def validate_candidates(candidates: list[Candidate], evidence: list[Evidence]) -
     by_id = {e.id: e for e in evidence}
     valid, seen = [], set()
     for candidate in candidates[:8]:
+        candidate = replace(candidate, title=clean_text(candidate.title), artist=clean_text(candidate.artist))
         key = (normalize(candidate.title), normalize(candidate.artist))
         if not all(key) or len(candidate.title) > 200 or len(candidate.artist) > 200:
             raise invalid_response()
@@ -110,15 +111,26 @@ def _validate_evidence_check(status, source_id, quote, rec, by_id, label):
             raise _Rejected("unknown_check_has_evidence",
                             f"check {label}: an unknown status needs an empty source_id and quote")
         return
-    if (source_id not in rec.source_ids or source_id not in by_id
-            or by_id[source_id].kind in {"guide", "metadata"}
-            or not quote.strip() or not normalize(quote)
-            or normalize(quote) not in normalize(by_id[source_id].text)
-            or len(quote.split()) > 25):
-        raise _Rejected("check_quote_not_in_source",
-                        f"check {label}: the quote must be an exact, verbatim passage of at most 25 words from a "
-                        "web or song_card source listed in this song's source_ids; otherwise use status unknown "
-                        "with an empty source_id and quote")
+    # Each way a quote can fail has its own log-safe reason, so a log shows which one the model keeps
+    # getting wrong. The hint is shared: it states the whole rule.
+    if source_id not in by_id:
+        reason = "check_source_unknown"
+    elif source_id not in rec.source_ids:
+        reason = "check_source_not_cited"
+    elif by_id[source_id].kind in {"guide", "metadata"}:
+        reason = "check_source_not_quotable"
+    elif not quote.strip() or not normalize(quote):
+        reason = "check_quote_empty"
+    elif len(quote.split()) > 25:
+        reason = "check_quote_too_long"
+    elif normalize(quote) not in normalize(by_id[source_id].text):
+        reason = "check_quote_not_in_source"
+    else:
+        return
+    raise _Rejected(reason,
+                    f"check {label}: the quote must be an exact, verbatim passage of at most 25 words from a "
+                    "web or song_card source listed in this song's source_ids; otherwise use status unknown "
+                    "with an empty source_id and quote")
 
 
 def _check_recommendation(rec, allowed, by_id, hard, preferences):
@@ -188,7 +200,8 @@ def _check_recommendation(rec, allowed, by_id, hard, preferences):
         logger.info("recommendation_rejected reason=no_preference_match")
         return None
     fit_score = weighted_fit / total_weight if total_weight else 1.0
-    return fit_score, replace(rec, fit_score=fit_score)
+    return fit_score, replace(rec, title=clean_text(rec.title), artist=clean_text(rec.artist),
+                              fit_score=fit_score)
 
 
 def validate_recommendations(recommendations, candidates, evidence, intent):

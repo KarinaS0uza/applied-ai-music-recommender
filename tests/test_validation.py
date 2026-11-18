@@ -265,6 +265,24 @@ def test_rejected_song_comes_back_with_a_fix_the_model_can_act_on(song, evidence
     assert hint in exc.value.feedback
 
 
+@pytest.mark.parametrize("song,evidence,reason", [
+    (rec(preference_checks=[pref_check(source="web_9")]), [web()], "check_source_unknown"),
+    (rec(preference_checks=[pref_check(source="web_2")]), TWO_PAGES, "check_source_not_cited"),
+    (rec(source_ids=["web_1", "mb_1"], preference_checks=[pref_check(source="mb_1", quote="identity metadata")]),
+     [web(), MUSICBRAINZ], "check_source_not_quotable"),
+    (rec(preference_checks=[pref_check(quote="  ")]), [web()], "check_quote_empty"),
+    (rec(claims=LONG_CLAIM, preference_checks=[pref_check(quote=QUOTE_26)]), [web(text=LONG_TEXT)],
+     "check_quote_too_long"),
+    (rec(preference_checks=[pref_check(quote="mellow lo-fi vibes")]), [web()], "check_quote_not_in_source"),
+], ids=["unknown-source", "source-not-cited", "metadata-source", "empty-quote", "quote-too-long", "quote-not-verbatim"])
+def test_each_way_a_check_quote_can_fail_logs_its_own_reason(song, evidence, reason, caplog):
+    """Each way a check quote can fail is logged with its own reason, with the model-facing hint unchanged."""
+    with caplog.at_level("INFO", logger="src.validation"), pytest.raises(DiscoveryError) as exc:
+        keep([song], evidence, INTENT_PREF)
+    assert f"recommendation_rejected reason={reason} position=0" in caplog.text
+    assert f"check {PREF_KEY}: the quote must be an exact, verbatim passage" in exc.value.feedback
+
+
 # --- validate_recommendations: what is accepted --------------------------------------------
 
 def test_a_25_word_quote_is_allowed():
@@ -359,3 +377,18 @@ def test_only_the_first_eight_recommendations_are_considered():
     nonsense = [rec(title=f"Invented {n}", artist="Nobody") for n in range(8)]
     with pytest.raises(DiscoveryError):  # the valid ninth song is never reached
         keep(nonsense + [rec()])
+
+
+# --- control characters in names -------------------------------------------------------------
+
+
+def test_a_garbled_title_is_shown_clean_even_though_it_still_matches_the_candidate():
+    """normalize() ignores control and replacement characters, so such a title matches; it must not display."""
+    kept = keep([rec(title="\x10\ufffd\x10\ufffd\ufffd\ufffdTake Five", artist="Dave\x00 Brubeck Quartet")])
+    assert [(r.title, r.artist) for r in kept] == [("Take Five", "Dave Brubeck Quartet")]
+
+
+def test_a_garbled_candidate_name_is_cleaned_before_it_is_kept():
+    garbled = Candidate("Take\ufffd Five\x10", "Dave Brubeck Quartet\ufffd", ["web_1"])
+    kept = validate_candidates([garbled], [web()])
+    assert [(c.title, c.artist) for c in kept] == [("Take Five", "Dave Brubeck Quartet")]

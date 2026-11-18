@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import logging
 import re
 import time
@@ -14,6 +15,11 @@ from src.validation import (identity_supported, invalid_response, validate_candi
                             validate_request)
 
 logger = logging.getLogger(__name__)
+
+# Shown as a soft note rather than a warning: results are still usable.
+UNVERIFIED_WARNING_PREFIX = "We couldn't confirm that any song meets every requirement"
+INTENT_FALLBACK_NOTICE = ("We couldn’t fully interpret the details of your request, "
+                          "so we searched using your exact words instead.")
 
 
 def _fallback_intent(request: MusicRequest) -> ParsedIntent:
@@ -117,17 +123,17 @@ def _source_says(source: Evidence, candidate: Candidate, intent: ParsedIntent) -
     return text, len(found)
 
 
-def _fallback_recommendations(candidates, evidence, intent):
-    """Return only source-identified songs when generated recommendation details are invalid.
+def _source_identified(candidates, evidence, intent, skip=frozenset()):
+    """Return the songs a source names, each showing what that source says about it.
 
-    Each song shows what its source says about it, and songs whose source text mentions more
-    of the requested traits come first.
+    Songs whose source text mentions more of the requested traits come first. A song whose
+    normalized (title, artist) is in ``skip`` is left out.
     """
-    if intent.hard_criteria:
-        return []
     by_id = {item.id: item for item in evidence}
     ranked = []
     for index, candidate in enumerate(candidates):
+        if (normalize(candidate.title), normalize(candidate.artist)) in skip:
+            continue
         source = next((by_id[source_id] for source_id in candidate.source_ids
                        if source_id in by_id and identity_supported(candidate, by_id[source_id])), None)
         if source is None:
@@ -143,6 +149,36 @@ def _fallback_recommendations(candidates, evidence, intent):
             [SupportedClaim("The source identifies this song and artist.", source.id, quote)],
         )))
     return [rec for _, _, rec in sorted(ranked, key=lambda row: row[:2])[:5]]
+
+
+def _fallback_recommendations(candidates, evidence, intent):
+    """Return only source-identified songs when generated recommendation details are invalid.
+
+    A request with hard criteria gets none here: a song cannot be listed as meeting a requirement
+    that nothing established. Those requests get labeled unverified songs instead.
+    """
+    if intent.hard_criteria:
+        return []
+    return _source_identified(candidates, evidence, intent)
+
+
+def _requirement_label(criterion) -> str:
+    """Name a hard criterion the way the listener said it: "clean singing", "no screaming"."""
+    value = " ".join(criterion.value.split())
+    if criterion.kind == "must_avoid" and not normalize(value).startswith(("no ", "without ", "sem ")):
+        return f"no {value}"
+    return value
+
+
+def _unverified_recommendations(candidates, evidence, intent, contradicted):
+    """Return source-identified songs for a request whose hard criteria nothing could verify.
+
+    Songs a check found to break a requirement are never shown. Each song says which requirements
+    could not be confirmed, and carries no match score.
+    """
+    labels = [_requirement_label(criterion) for criterion in intent.hard_criteria]
+    return [replace(rec, uncertainties=[f"We couldn't confirm {label}." for label in labels])
+            for rec in _source_identified(candidates, evidence, intent, skip=contradicted)]
 
 
 def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
@@ -183,7 +219,7 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
     intent = model_stage(
         "intent", lambda feedback=None: validate_parsed_intent(request, analyze(request)),
         lambda: _fallback_intent(request),
-        "The detailed request analysis could not be validated, so retrieval used your original wording.")
+        INTENT_FALLBACK_NOTICE)
     evidence = list(search(request, intent))[:12]
     if request.enhanced and documents:
         try:
@@ -202,7 +238,7 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
         "candidates",
         lambda feedback=None: validate_candidates(extract(request, intent, evidence), evidence),
         lambda: [],
-        "The generated song identities could not be validated against the retrieved sources.")
+        "We couldn’t confirm any specific songs from the sources we found.")
     if not candidates:
         return DiscoveryResult([], evidence, warnings + [
             "Sources were found, but no song and artist identities could be verified."], intent)
@@ -222,13 +258,22 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
     if len({e.id for e in evidence}) != len(evidence):
         raise invalid_response()
     judged = set()  # candidates the model returned a verdict row for, whether or not it held up
+    contradicted = set()  # candidates whose verdict says they break a hard criterion
+
+    def record_verdicts(generated):
+        """Remember which candidates the model judged, and which of them break a hard criterion."""
+        for rec in generated:
+            key = (normalize(rec.title), normalize(rec.artist))
+            judged.add(key)
+            if any(check.status == "contradicted" for check in rec.constraint_checks):
+                contradicted.add(key)
 
     def generate_checked(feedback=None):
         """Generate recommendations, optionally with repair feedback, and validate them against the evidence."""
         # The first call is unchanged; a retry also tells the model which checks failed.
         extra = {"feedback": feedback} if feedback else {}
         generated = generate(request, intent, candidates, evidence, **extra)
-        judged.update((normalize(rec.title), normalize(rec.artist)) for rec in generated)
+        record_verdicts(generated)
         return validate_recommendations(generated, candidates, evidence, intent)
 
     recommendations = model_stage(
@@ -246,11 +291,22 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
         logger.info("generation_follow_up stage=recommendations judged=%d skipped=%d",
                     len(candidates) - len(skipped), len(skipped))
         try:
-            recommendations = validate_recommendations(
-                generate(request, intent, skipped, evidence), skipped, evidence, intent)
+            generated = generate(request, intent, skipped, evidence)
+            record_verdicts(generated)
+            recommendations = validate_recommendations(generated, skipped, evidence, intent)
         except DiscoveryError as error:
             logger.warning("generation_follow_up_failed code=%s", error.code)
             warnings.append("Some candidates could not be checked against your request.")
+    unverified = []
+    if not recommendations and intent.hard_criteria:
+        # Nothing could be confirmed to meet every requirement. Rather than show nothing, list the
+        # songs a source names that no check ruled out, labeled so nobody mistakes them for matches.
+        recommendations = _unverified_recommendations(candidates, evidence, intent, contradicted)
+        if recommendations:
+            unverified = [_requirement_label(criterion) for criterion in intent.hard_criteria]
+            warnings.append(
+                f"{UNVERIFIED_WARNING_PREFIX} ({'; '.join(unverified)}). "
+                "These songs are only named by their sources, so check them before you rely on them.")
     if not recommendations:
         if intent.hard_criteria:
             warnings.append("No candidate had evidence supporting every required or excluded trait.")
@@ -260,8 +316,8 @@ def discover_music(request: MusicRequest, *, analyze, search, extract, generate,
             warnings.append("The retrieved evidence did not establish a supported recommendation.")
     used_partial = any(check.status == "partial" for rec in recommendations
                        for check in rec.preference_checks)
-    logger.info("discovery_complete enhanced=%s criteria=%d queries=%d evidence=%d candidates=%d recommendations=%d partial=%s latency_ms=%d",
+    logger.info("discovery_complete enhanced=%s criteria=%d queries=%d evidence=%d candidates=%d recommendations=%d partial=%s unverified=%s latency_ms=%d",
                 request.enhanced, len(intent.criteria), len(intent.search_queries), len(evidence),
-                len(candidates), len(recommendations), used_partial,
+                len(candidates), len(recommendations), used_partial, bool(unverified),
                 (time.monotonic() - started) * 1000)
-    return DiscoveryResult(recommendations, evidence, warnings, intent, used_partial, notices)
+    return DiscoveryResult(recommendations, evidence, warnings, intent, used_partial, notices, unverified)

@@ -10,7 +10,7 @@ import pytest
 
 from src.providers import Settings
 from src.composition import find_music
-from src.discovery import discover_music
+from src.discovery import _requirement_label, discover_music
 from src.models import (Candidate, ConstraintCheck, DiscoveryError, Evidence,
                         MusicRequest, ParsedIntent, PreferenceCheck, Recommendation,
                         SupportedClaim, TasteCriterion)
@@ -263,8 +263,8 @@ def test_candidate_without_any_preference_match_is_not_returned():
     assert "matching any requested preference" in result.warnings[-1]
 
 
-def test_unknown_hard_constraint_rejects_candidate_without_relaxing_it():
-    """Unknown hard constraint rejects candidate without relaxing it."""
+def test_unknown_hard_constraint_lists_the_song_as_unverified_instead_of_matching_it():
+    """A hard criterion nothing established never becomes a match: the song is listed, labeled unverified."""
     e = source()
     hard = TasteCriterion("vocals", "must_avoid", "vocals", 3, "no vocals")
     parsed = ParsedIntent([hard], ["instrumental jazz songs"])
@@ -273,8 +273,48 @@ def test_unknown_hard_constraint_rejects_candidate_without_relaxing_it():
     ])
     result, _ = run(MusicRequest("jazz with no vocals"), evidence=e,
                     analyze=Mock(return_value=parsed), generate=Mock(return_value=[rec]))
-    assert result.recommendations == []
+    assert [r.title for r in result.recommendations] == ["Take Five"]
+    song = result.recommendations[0]
+    assert song.fit_score is None  # never presented as a scored match
+    assert song.uncertainties == ["We couldn't confirm no vocals."]
+    assert result.unverified_requirements == ["no vocals"]
+    assert "couldn't confirm that any song meets every requirement (no vocals)" in result.warnings[-1]
+    assert "required or excluded trait" not in " ".join(result.warnings)
+
+
+def test_a_song_a_check_found_to_break_a_requirement_is_never_listed_even_as_unverified():
+    """A contradicted song is dropped; only songs nothing ruled out are listed as unverified."""
+    first = source("Song 1", "Artist 1", "web_1")
+    breaks = recommendation(first, constraint_checks=[
+        ConstraintCheck(HARD_KEY, "contradicted", first.id, "instrumental jazz")])
+    result, *_ = run_two_songs(Mock(return_value=[breaks]))  # Song 2 was never judged
+    assert [rec.title for rec in result.recommendations] == ["Song 2"]
+    assert result.unverified_requirements == ["no vocals"]
+
+
+def test_when_every_candidate_breaks_a_requirement_nothing_is_listed():
+    """With every candidate contradicted there is nothing to show, so the old warning stands."""
+    e = source()
+    hard = TasteCriterion("vocals", "must_avoid", "vocals", 3, "no vocals")
+    rec = recommendation(e, constraint_checks=[
+        ConstraintCheck("vocals:vocals:must_avoid", "contradicted", e.id, "instrumental jazz")])
+    result, _ = run(MusicRequest("jazz with no vocals"), evidence=e,
+                    analyze=Mock(return_value=ParsedIntent([hard], ["instrumental jazz songs"])),
+                    generate=Mock(return_value=[rec]))
+    assert result.recommendations == [] and result.unverified_requirements == []
     assert "required or excluded trait" in result.warnings[-1]
+
+
+@pytest.mark.parametrize("kind,value,label", [
+    ("must_have", "clean singing", "clean singing"),
+    ("must_avoid", "screaming", "no screaming"),
+    ("must_avoid", "no vocals", "no vocals"),         # already says it
+    ("must_avoid", "Without  Vocals", "Without Vocals"),
+    ("must_avoid", "sem voz", "sem voz"),
+])
+def test_requirement_labels_read_the_way_the_listener_said_them(kind, value, label):
+    """Requirement labels read the way the listener said them."""
+    assert _requirement_label(TasteCriterion("vocals", kind, value, 3, value)) == label
 
 
 def test_cross_song_citation_cannot_support_traits():
@@ -326,7 +366,7 @@ def test_invalid_intent_degrades_to_the_original_wording():
                        degrade_invalid=True)
     assert result.intent == ParsedIntent([], ["instrumental jazz"])
     assert deps["search"].call_args.args[1] == result.intent
-    assert any("original wording" in warning for warning in result.warnings)
+    assert any("searched using your exact words" in warning for warning in result.warnings)
     assert result.recommendations
 
 
@@ -337,7 +377,7 @@ def test_invalid_candidates_degrade_to_no_results():
     result, _ = run(extract=Mock(return_value=[unknown_source]), generate=generate,
                     degrade_invalid=True)
     assert result.recommendations == []
-    assert any("could not be validated" in warning for warning in result.warnings)
+    assert any("couldn’t confirm any specific songs" in warning for warning in result.warnings)
     generate.assert_not_called()
 
 
@@ -451,15 +491,16 @@ def test_failed_repair_still_degrades_after_a_single_retry():
     assert any("without a match score" in warning for warning in result.warnings)
 
 
-def test_degraded_recommendations_never_relax_hard_criteria():
-    """Degraded recommendations never relax hard criteria."""
+def test_degraded_recommendations_never_match_a_hard_criterion():
+    """Degraded recommendations never match a hard criterion; they are listed as unverified."""
     hard = TasteCriterion("vocals", "must_avoid", "vocals", 3, "no vocals")
     invalid = replace(recommendation(source()), source_ids=["invented"])
     result, _ = run(MusicRequest("jazz with no vocals"),
                     analyze=Mock(return_value=ParsedIntent([hard], ["instrumental jazz songs"])),
                     generate=Mock(return_value=[invalid]), degrade_invalid=True)
-    assert result.recommendations == []
-    assert "required or excluded trait" in result.warnings[-1]
+    assert [(rec.title, rec.fit_score) for rec in result.recommendations] == [("Take Five", None)]
+    assert result.unverified_requirements == ["no vocals"]
+    assert "couldn't confirm that any song meets every requirement" in result.warnings[-1]
 
 
 def test_unestablished_recommendation_gets_a_generic_warning():
@@ -521,7 +562,8 @@ def test_follow_up_check_is_skipped_when_the_model_judged_nothing():
     # At temperature 0 asking again about the same candidates would give the same empty answer.
     generate = Mock(return_value=[])
     result, *_ = run_two_songs(generate, retry_invalid=True)
-    assert result.recommendations == []
+    assert all(rec.fit_score is None for rec in result.recommendations)  # nothing verified or scored
+    assert result.unverified_requirements == ["no vocals"]
     assert generate.call_count == 1
 
 
@@ -529,14 +571,14 @@ def test_follow_up_check_needs_the_shared_retry_so_the_call_limit_holds():
     """Follow up check needs the shared retry so the call limit holds."""
     skipped = Mock(side_effect=[[excluded(source("Song 1", "Artist 1", "web_1"))], [established(source("Song 2", "Artist 2", "web_2"))]])
     result, *_ = run_two_songs(skipped)  # retry_invalid is off
-    assert result.recommendations == [] and skipped.call_count == 1
+    assert result.unverified_requirements == ["no vocals"] and skipped.call_count == 1
 
     # An earlier stage already spent the retry, so there is no call left for a follow-up.
     malformed = ParsedIntent([TasteCriterion("genre", "preference", "jazz", 2, "not in the request")], ["jazz"])
     spent = Mock(return_value=[excluded(source("Song 1", "Artist 1", "web_1"))])
     result, *_ = run_two_songs(spent, retry_invalid=True,
                                analyze=Mock(side_effect=[malformed, ParsedIntent([HARD], ["instrumental jazz songs"])]))
-    assert result.recommendations == [] and spent.call_count == 1
+    assert result.unverified_requirements == ["no vocals"] and spent.call_count == 1
 
 
 def test_failed_follow_up_check_keeps_the_result_and_warns():
@@ -544,9 +586,10 @@ def test_failed_follow_up_check_keeps_the_result_and_warns():
     generate = Mock(side_effect=[[excluded(source("Song 1", "Artist 1", "web_1"))],
                                  DiscoveryError("quota", "Gemini is rate limited or out of quota.")])
     result, *_ = run_two_songs(generate, retry_invalid=True)
-    assert result.recommendations == []
+    assert result.unverified_requirements == ["no vocals"]
+    assert all(rec.fit_score is None for rec in result.recommendations)
     assert any("could not be checked" in warning for warning in result.warnings)
-    assert "required or excluded trait" in result.warnings[-1]
+    assert "couldn't confirm that any song meets every requirement" in result.warnings[-1]
 
 
 def test_unavailable_documents_fall_back_to_external_evidence():
@@ -576,6 +619,7 @@ def test_supported_hard_constraint_keeps_the_candidate():
                     generate=Mock(return_value=[rec]))
     assert [r.title for r in result.recommendations] == ["Take Five"]
     assert result.recommendations[0].fit_score == 1.0
+    assert result.unverified_requirements == []  # a verified song is a real match, so nothing is flagged
 
 
 @pytest.mark.parametrize("checks", [
@@ -619,10 +663,12 @@ def test_results_are_ranked_by_fit_and_capped_at_five():
 def providers():
     """Patch the providers and the discovery function that find_music builds."""
     with patch("src.composition.GeminiProvider") as gemini, \
+            patch("src.composition.GeminiEmbeddingProvider") as embedding, \
             patch("src.composition.TavilyProvider") as tavily, \
             patch("src.composition.MusicBrainzProvider") as musicbrainz, \
             patch("src.composition.discover_music") as discover:
-        yield SimpleNamespace(gemini=gemini, tavily=tavily, musicbrainz=musicbrainz, discover=discover)
+        yield SimpleNamespace(gemini=gemini, embedding=embedding, tavily=tavily,
+                              musicbrainz=musicbrainz, discover=discover)
 
 
 @pytest.mark.parametrize("enhanced", [False, True])
@@ -638,10 +684,25 @@ def test_find_music_wires_providers_and_always_closes_them(providers, enhanced):
     assert (kwargs["documents"] is not None) is enhanced
     assert (kwargs["metadata"] is not None) is enhanced
     assert providers.musicbrainz.called is enhanced
+    assert providers.embedding.called is enhanced
+    providers.tavily.assert_called_once_with(
+        settings.tavily_api_key,
+        music_source_focus_enabled=settings.music_source_focus_enabled,
+    )
     if enhanced:
         providers.musicbrainz.assert_called_once_with(settings.musicbrainz_contact)
+        providers.embedding.assert_called_once_with(settings, client=providers.gemini.return_value.client)
         providers.musicbrainz.return_value.session.close.assert_called_once()
     providers.tavily.return_value.session.close.assert_called_once()
+
+
+def test_find_music_can_disable_semantic_retrieval_without_disabling_local_documents(providers):
+    """The kill switch uses the original lexical callback and keeps enhanced metadata enabled."""
+    settings = Settings("fixture", "fixture", semantic_retrieval_enabled=False)
+    find_music(MusicRequest("jazz", enhanced=True), settings)
+    kwargs = providers.discover.call_args.kwargs
+    assert kwargs["documents"] is not None and kwargs["metadata"] is not None
+    providers.embedding.assert_not_called()
 
 
 @pytest.mark.parametrize("error,code", [
@@ -842,4 +903,5 @@ def test_find_music_without_settings_reads_the_server_environment(providers, mon
     monkeypatch.setenv("GEMINI_API_KEY", "gemini-env-key")
     find_music(MusicRequest("jazz"))
     assert providers.tavily.call_args.args == ("tavily-env-key",)
+    assert providers.tavily.call_args.kwargs == {"music_source_focus_enabled": True}
     assert providers.gemini.call_args.args[0].gemini_api_key == "gemini-env-key"

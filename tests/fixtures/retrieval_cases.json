@@ -1,0 +1,47 @@
+{
+  "_comment": "Deterministic local-retrieval evaluation. Relevant ids are human labels based on the card tags and descriptions; search_queries stand in for the existing Gemini intent expansion without making network calls.",
+  "cases": [
+    {
+      "id": "expressive-vocals",
+      "description": "Slow-paced music with emotionally expressive vocals",
+      "reference_song": null,
+      "search_queries": ["mournful ethereal trip hop vocals"],
+      "relevant_card_ids": ["teardrop"]
+    },
+    {
+      "id": "electronic-running",
+      "description": "Fast upbeat electronic music for running",
+      "reference_song": null,
+      "search_queries": ["upbeat electronic dance running songs"],
+      "relevant_card_ids": ["around-the-world", "born-slippy", "ditto", "lose-yourself"]
+    },
+    {
+      "id": "instrumental-piano",
+      "description": "Calm instrumental piano for studying with no vocals",
+      "reference_song": null,
+      "search_queries": ["calm instrumental piano study no vocals"],
+      "relevant_card_ids": ["merry-christmas", "miss-clare", "nuvole", "river-flows"]
+    },
+    {
+      "id": "portuguese-percussion",
+      "description": "Energetic Portuguese-language music with percussion",
+      "reference_song": null,
+      "search_queries": ["energetic Portuguese percussion songs"],
+      "relevant_card_ids": ["aguas", "mas-que-nada"]
+    },
+    {
+      "id": "heavy-guitar-clean-vocals",
+      "description": "Heavy guitar music with clean singing and no screaming",
+      "reference_song": null,
+      "search_queries": ["heavy metal guitar clean vocals no screaming"],
+      "relevant_card_ids": ["du-hast", "nothing-else-matters"]
+    },
+    {
+      "id": "modal-jazz-reference",
+      "description": "Modal jazz with a piano and bass introduction and a moderate pace, by another artist",
+      "reference_song": "Take Five — Dave Brubeck Quartet",
+      "search_queries": ["modal jazz piano bass moderate pace"],
+      "relevant_card_ids": ["take-five", "so-what"]
+    }
+  ]
+}
