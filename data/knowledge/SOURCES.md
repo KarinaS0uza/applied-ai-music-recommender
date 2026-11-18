@@ -3,7 +3,7 @@
 This folder is the local evidence set that enhanced retrieval searches in addition
 to the web. It holds two files:
 
-- `song_cards.json`: 26 short song cards, each a paraphrase of one English
+- `song_cards.json`: 56 short song cards, each a paraphrase of one English
   Wikipedia article.
 - `music_guide.md`: a vocabulary guide written for this project. It explains
   how people describe pace, vocals, instruments and similar traits. It is not derived
@@ -29,7 +29,7 @@ claim; each card's `provenance` field says so.
 
 ## Card sources
 
-All 26 cards were prepared from the pages below and retrieved on the date shown.
+All 56 cards were prepared from the pages below and retrieved on the date shown.
 
 | Card id | Title | Artist | Source | Retrieved |
 | --- | --- | --- | --- | --- |
@@ -59,6 +59,36 @@ All 26 cards were prepared from the pages below and retrieved on the date shown.
 | `teardrop` | Teardrop | Massive Attack | <https://en.wikipedia.org/wiki/Teardrop_(song)> | 2026-11-11 |
 | `merry-christmas` | Merry Christmas Mr. Lawrence | Ryuichi Sakamoto | <https://en.wikipedia.org/wiki/Playing_the_Piano> | 2026-11-11 |
 | `miss-clare` | Miss Clare Remembers | Enya | <https://en.wikipedia.org/wiki/Watermark_(Enya_album)> | 2026-11-11 |
+| `dynamite` | Dynamite | BTS | <https://en.wikipedia.org/wiki/Dynamite_(BTS_song)> | 2026-11-17 |
+| `next-level-aespa` | Next Level | Aespa | <https://en.wikipedia.org/wiki/Next_Level_(Aespa_song)> | 2026-11-17 |
+| `love-scenario` | Love Scenario | iKon | <https://en.wikipedia.org/wiki/Love_Scenario> | 2026-11-17 |
+| `ditto` | Ditto | NewJeans | <https://en.wikipedia.org/wiki/Ditto_(NewJeans_song)> | 2026-11-17 |
+| `blinding-lights` | Blinding Lights | The Weeknd | <https://en.wikipedia.org/wiki/Blinding_Lights> | 2026-11-17 |
+| `levitating` | Levitating | Dua Lipa | <https://en.wikipedia.org/wiki/Levitating_(song)> | 2026-11-17 |
+| `happy-pharrell` | Happy | Pharrell Williams | <https://en.wikipedia.org/wiki/Happy_(Pharrell_Williams_song)> | 2026-11-17 |
+| `shake-it-off` | Shake It Off | Taylor Swift | <https://en.wikipedia.org/wiki/Shake_It_Off> | 2026-11-17 |
+| `mr-brightside` | Mr. Brightside | The Killers | <https://en.wikipedia.org/wiki/Mr._Brightside> | 2026-11-17 |
+| `seven-nation-army` | Seven Nation Army | The White Stripes | <https://en.wikipedia.org/wiki/Seven_Nation_Army> | 2026-11-17 |
+| `dreams-fleetwood-mac` | Dreams | Fleetwood Mac | <https://en.wikipedia.org/wiki/Dreams_(Fleetwood_Mac_song)> | 2026-11-17 |
+| `dont-stop-me-now` | Don't Stop Me Now | Queen | <https://en.wikipedia.org/wiki/Don%27t_Stop_Me_Now> | 2026-11-17 |
+| `lose-yourself` | Lose Yourself | Eminem | <https://en.wikipedia.org/wiki/Lose_Yourself> | 2026-11-17 |
+| `alright-kendrick` | Alright | Kendrick Lamar | <https://en.wikipedia.org/wiki/Alright_(Kendrick_Lamar_song)> | 2026-11-17 |
+| `juicy-biggie` | Juicy | The Notorious B.I.G. | <https://en.wikipedia.org/wiki/Juicy_(The_Notorious_B.I.G._song)> | 2026-11-17 |
+| `the-message` | The Message | Grandmaster Flash and the Furious Five | <https://en.wikipedia.org/wiki/The_Message_(Grandmaster_Flash_and_the_Furious_Five_song)> | 2026-11-17 |
+| `no-scrubs` | No Scrubs | TLC | <https://en.wikipedia.org/wiki/No_Scrubs> | 2026-11-17 |
+| `crazy-in-love` | Crazy in Love | Beyoncé featuring Jay-Z | <https://en.wikipedia.org/wiki/Crazy_in_Love> | 2026-11-17 |
+| `untitled-how-does-it-feel` | Untitled (How Does It Feel) | D'Angelo | <https://en.wikipedia.org/wiki/Untitled_(How_Does_It_Feel)> | 2026-11-17 |
+| `redbone` | Redbone | Childish Gambino | <https://en.wikipedia.org/wiki/Redbone_(song)> | 2026-11-17 |
+| `titanium` | Titanium | David Guetta featuring Sia | <https://en.wikipedia.org/wiki/Titanium_(David_Guetta_song)> | 2026-11-17 |
+| `levels` | Levels | Avicii | <https://en.wikipedia.org/wiki/Levels_(Avicii_song)> | 2026-11-17 |
+| `one-more-time` | One More Time | Daft Punk | <https://en.wikipedia.org/wiki/One_More_Time_(Daft_Punk_song)> | 2026-11-17 |
+| `stronger-kanye` | Stronger | Kanye West | <https://en.wikipedia.org/wiki/Stronger_(Kanye_West_song)> | 2026-11-17 |
+| `gasolina` | Gasolina | Daddy Yankee | <https://en.wikipedia.org/wiki/Gasolina> | 2026-11-17 |
+| `waka-waka` | Waka Waka (This Time for Africa) | Shakira featuring Freshlyground | <https://en.wikipedia.org/wiki/Waka_Waka_(This_Time_for_Africa)> | 2026-11-17 |
+| `calm-down-rema` | Calm Down | Rema | <https://en.wikipedia.org/wiki/Calm_Down_(Rema_song)> | 2026-11-17 |
+| `water-tyla` | Water | Tyla | <https://en.wikipedia.org/wiki/Water_(Tyla_song)> | 2026-11-17 |
+| `good-as-hell` | Good as Hell | Lizzo | <https://en.wikipedia.org/wiki/Good_as_Hell> | 2026-11-17 |
+| `cant-hold-us` | Can't Hold Us | Macklemore & Ryan Lewis featuring Ray Dalton | <https://en.wikipedia.org/wiki/Can%27t_Hold_Us> | 2026-11-17 |
 
 ## Adding or changing a card
 

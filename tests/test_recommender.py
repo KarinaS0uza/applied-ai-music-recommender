@@ -314,3 +314,15 @@ def test_genre_suggestions_honor_the_limit_and_a_blank_query():
     songs = [{"genre": f"funk {name}"} for name in ("c", "a", "b")]
     assert suggest_genres("funk", songs, limit=2) == ["funk a", "funk b"]  # equal overlap sorts by name
     assert suggest_genres("", songs) == []
+
+
+def test_trait_match_fractions_give_each_requested_trait_a_percentage():
+    """Genre and mood are all-or-nothing; energy falls off linearly; blank traits are left out."""
+    from src.recommender import trait_match_fractions
+    song = {"genre": "pop", "mood": "happy", "energy": 0.8}
+    prefs = {"genre": "pop", "mood": "happy", "energy": 0.7}
+    fractions = trait_match_fractions(prefs, song)
+    assert fractions["genre match"] == 1.0 and fractions["mood match"] == 1.0
+    assert fractions["energy similarity"] == pytest.approx(0.8)
+    assert trait_match_fractions({**prefs, "genre": "rock", "mood": ""}, song) == {
+        "genre match": 0.0, "energy similarity": pytest.approx(0.8)}

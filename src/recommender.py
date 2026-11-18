@@ -90,6 +90,11 @@ def load_songs(csv_path: str) -> List[Dict]:
     print(f"Loaded songs: {len(songs)}")
     return songs
 
+def _energy_similarity(song_energy: float, preferred_energy: float) -> float:
+    """1.0 for an identical energy level, falling off linearly to 0.0 half a point away."""
+    return max(0.0, 1.0 - abs(song_energy - preferred_energy) / 0.5)
+
+
 def _genre_matches(song_genre: str, preferred) -> bool:
     """A preferred genre is one catalog label or a collection of acceptable labels."""
     if isinstance(preferred, str):
@@ -121,16 +126,30 @@ class RankingStrategy:
 
         energy = song.get("energy")
         if energy is not None and "energy" in user_prefs:
-            energy_similarity = max(
-                0.0,
-                1.0 - abs(energy - user_prefs["energy"]) / 0.5,
-            )
+            energy_similarity = _energy_similarity(energy, user_prefs["energy"])
             weighted_energy = self.energy_weight * energy_similarity
             if weighted_energy > 0:
                 score += weighted_energy
                 reasons.append(f"energy similarity (+{weighted_energy:.2f})")
 
         return score, reasons
+
+
+def trait_match_fractions(user_prefs: Dict, song: Dict) -> Dict[str, float]:
+    """How well a song matches each core trait, from 0.0 to 1.0, keyed by the reason label.
+
+    The keys are the labels ``score_core`` writes into its reasons, so a card can pair each
+    reason with a percentage. Only traits the listener actually asked for are included.
+    """
+    fractions = {}
+    if _has_preference(user_prefs.get("genre")):
+        fractions["genre match"] = 1.0 if _genre_matches(song["genre"], user_prefs["genre"]) else 0.0
+    if _has_preference(user_prefs.get("mood")):
+        fractions["mood match"] = 1.0 if song["mood"] == user_prefs["mood"] else 0.0
+    energy = song.get("energy")
+    if energy is not None and user_prefs.get("energy") is not None:
+        fractions["energy similarity"] = _energy_similarity(energy, user_prefs["energy"])
+    return fractions
 
 
 RANKING_STRATEGIES = {

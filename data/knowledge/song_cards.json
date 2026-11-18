@@ -738,6 +738,935 @@
         "measured energy",
         "listener-specific mood or activity fit"
       ]
+    },
+    {
+      "id": "dynamite",
+      "title": "Dynamite",
+      "artist": "BTS",
+      "version": "Original English-language single (2020)",
+      "language": "English",
+      "description": "Upbeat disco-pop with funk and soul elements, a disco rhythm, synths, handclaps and celebratory horns. The original runs at 114 BPM and was BTS's first song recorded fully in English.",
+      "tags": [
+        "K-pop",
+        "disco pop",
+        "funk",
+        "upbeat",
+        "dance",
+        "114 BPM",
+        "English"
+      ],
+      "sources": [
+        {
+          "title": "Dynamite (BTS song)",
+          "url": "https://en.wikipedia.org/wiki/Dynamite_(BTS_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "next-level-aespa",
+      "title": "Next Level",
+      "artist": "Aespa",
+      "version": "Aespa single (2021), not the A$ton Wyld original",
+      "language": "Korean and English",
+      "description": "K-pop dance and hip-hop track with an energetic bass riff, groovy rap and an upbeat new-jack-swing bridge. Its shifting arrangement runs at 109 BPM.",
+      "tags": [
+        "K-pop",
+        "hip hop",
+        "dance pop",
+        "electronic",
+        "energetic",
+        "109 BPM",
+        "Korean",
+        "English"
+      ],
+      "sources": [
+        {
+          "title": "Next Level (Aespa song)",
+          "url": "https://en.wikipedia.org/wiki/Next_Level_(Aespa_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "love-scenario",
+      "title": "Love Scenario",
+      "artist": "iKon",
+      "version": "Original Korean single (2018), not Japanese or Mandarin version",
+      "language": "Korean",
+      "description": "K-pop and hip-hop track with a gentle cowbell-style beat, swaying vocals and a rhythmic dance arrangement. Its breakup mood is described as mellow yet relatively upbeat.",
+      "tags": [
+        "K-pop",
+        "hip hop",
+        "dance",
+        "mellow",
+        "upbeat",
+        "Korean",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Love Scenario",
+          "url": "https://en.wikipedia.org/wiki/Love_Scenario",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "ditto",
+      "title": "Ditto",
+      "artist": "NewJeans",
+      "version": "Original NewJeans single (2022)",
+      "language": "Korean",
+      "description": "Balladic Baltimore-club track with electronic dance production, atmospheric synth pads, soft syncopated beats, claps and 808 drums. Its fast tempo is about 130 BPM.",
+      "tags": [
+        "K-pop",
+        "Baltimore club",
+        "electronic",
+        "dance",
+        "balladic",
+        "atmospheric",
+        "130 BPM",
+        "Korean"
+      ],
+      "sources": [
+        {
+          "title": "Ditto (song)",
+          "url": "https://en.wikipedia.org/wiki/Ditto_(NewJeans_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "blinding-lights",
+      "title": "Blinding Lights",
+      "artist": "The Weeknd",
+      "version": "After Hours album recording (2019)",
+      "language": "unknown",
+      "description": "Synth-pop, electropop, dance-pop and new-wave track with an eighties-styled keyboard sound and a propulsive production; its lyrics concern wanting to see a partner at night.",
+      "tags": [
+        "synth pop",
+        "electropop",
+        "dance pop",
+        "new wave",
+        "propulsive",
+        "synthesizer",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Blinding Lights",
+          "url": "https://en.wikipedia.org/wiki/Blinding_Lights",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "levitating",
+      "title": "Levitating",
+      "artist": "Dua Lipa",
+      "version": "Future Nostalgia album version (2020), not a remix",
+      "language": "unknown",
+      "description": "Electro-disco, nu-disco and pop-funk track built around synth hooks, syncopated handclaps, bass, funky guitar and disco strings. The original runs at 103 BPM.",
+      "tags": [
+        "electro disco",
+        "nu disco",
+        "pop funk",
+        "dance",
+        "synthesizer",
+        "103 BPM",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Levitating (song)",
+          "url": "https://en.wikipedia.org/wiki/Levitating_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "happy-pharrell",
+      "title": "Happy",
+      "artist": "Pharrell Williams",
+      "version": "Despicable Me 2 soundtrack recording (2013)",
+      "language": "unknown",
+      "description": "Up-tempo soul and neo-soul song running at 160 BPM, with Pharrell Williams singing part of the track in falsetto.",
+      "tags": [
+        "soul",
+        "neo soul",
+        "happy",
+        "up tempo",
+        "160 BPM",
+        "falsetto",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Happy (Pharrell Williams song)",
+          "url": "https://en.wikipedia.org/wiki/Happy_(Pharrell_Williams_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "shake-it-off",
+      "title": "Shake It Off",
+      "artist": "Taylor Swift",
+      "version": "1989 album recording (2014), not Taylor's Version",
+      "language": "unknown",
+      "description": "Uptempo dance-pop at 160 BPM, using a stomping drum-and-clap pattern and a looping Mellotron-based saxophone line.",
+      "tags": [
+        "dance pop",
+        "up tempo",
+        "160 BPM",
+        "drums",
+        "handclaps",
+        "saxophone",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Shake It Off",
+          "url": "https://en.wikipedia.org/wiki/Shake_It_Off",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "mr-brightside",
+      "title": "Mr. Brightside",
+      "artist": "The Killers",
+      "version": "Hot Fuss album recording (2003)",
+      "language": "unknown",
+      "description": "Alternative-rock and new-wave song with a moderately fast tempo of about 148 BPM; its lyrics portray jealousy and paranoia.",
+      "tags": [
+        "alternative rock",
+        "new wave",
+        "fast",
+        "148 BPM",
+        "jealousy",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Mr. Brightside",
+          "url": "https://en.wikipedia.org/wiki/Mr._Brightside",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "seven-nation-army",
+      "title": "Seven Nation Army",
+      "artist": "The White Stripes",
+      "version": "Elephant album recording (2003)",
+      "language": "unknown",
+      "description": "Alternative, garage and blues rock at 120 BPM, centered on its recurring riff. The riff became a chant and anthem at football and other sporting events.",
+      "tags": [
+        "alternative rock",
+        "garage rock",
+        "blues rock",
+        "120 BPM",
+        "sports anthem",
+        "riff",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Seven Nation Army",
+          "url": "https://en.wikipedia.org/wiki/Seven_Nation_Army",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "dreams-fleetwood-mac",
+      "title": "Dreams",
+      "artist": "Fleetwood Mac",
+      "version": "Rumours album recording (1977), not later cover versions",
+      "language": "unknown",
+      "description": "Soft-rock recording written and sung by Stevie Nicks, built over a repeated drum-loop rhythm with bass, keyboards and layered electric-guitar signals.",
+      "tags": [
+        "soft rock",
+        "drum loop",
+        "bass",
+        "keyboard",
+        "electric guitar",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Dreams (Fleetwood Mac song)",
+          "url": "https://en.wikipedia.org/wiki/Dreams_(Fleetwood_Mac_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "dont-stop-me-now",
+      "title": "Don't Stop Me Now",
+      "artist": "Queen",
+      "version": "Jazz album recording (1978)",
+      "language": "unknown",
+      "description": "Pop-rock song that begins with Freddie Mercury singing over piano, then builds with bass, drums, percussion, guitar and layered backing vocals.",
+      "tags": [
+        "pop rock",
+        "piano",
+        "drums",
+        "percussion",
+        "guitar",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Don't Stop Me Now",
+          "url": "https://en.wikipedia.org/wiki/Don%27t_Stop_Me_Now",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "lose-yourself",
+      "title": "Lose Yourself",
+      "artist": "Eminem",
+      "version": "8 Mile soundtrack recording (2002)",
+      "language": "unknown",
+      "description": "Mid-tempo hip-hop with an urgent narrative delivery and aggressive themes about overcoming obstacles. At 171 BPM, it has also appeared among popular songs on running playlists.",
+      "tags": [
+        "hip hop",
+        "rap",
+        "urgent",
+        "aggressive",
+        "171 BPM",
+        "running",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Lose Yourself",
+          "url": "https://en.wikipedia.org/wiki/Lose_Yourself",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "alright-kendrick",
+      "title": "Alright",
+      "artist": "Kendrick Lamar",
+      "version": "To Pimp a Butterfly album recording (2015)",
+      "language": "unknown",
+      "description": "Conscious hip-hop, jazz rap and gospel expressing hope amid personal struggle, with marching-band propulsion and breezy jazz reeds.",
+      "tags": [
+        "conscious hip hop",
+        "jazz rap",
+        "gospel",
+        "hopeful",
+        "marching band",
+        "rap",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Alright (Kendrick Lamar song)",
+          "url": "https://en.wikipedia.org/wiki/Alright_(Kendrick_Lamar_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "juicy-biggie",
+      "title": "Juicy",
+      "artist": "The Notorious B.I.G.",
+      "version": "Ready to Die album single (1994)",
+      "language": "unknown",
+      "description": "East Coast hip-hop single built on a sample of the instrumental mix of Mtume's Juicy Fruit, with rap verses and an alternate chorus sung by Total and Sean Combs.",
+      "tags": [
+        "East Coast hip hop",
+        "rap",
+        "sample",
+        "sung chorus",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Juicy (The Notorious B.I.G. song)",
+          "url": "https://en.wikipedia.org/wiki/Juicy_(The_Notorious_B.I.G._song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "the-message",
+      "title": "The Message",
+      "artist": "Grandmaster Flash and the Furious Five",
+      "version": "Original Sugar Hill single (1982)",
+      "language": "unknown",
+      "description": "Early prominent hip-hop social commentary whose rap lyrics describe the stress of inner-city poverty and the consequences of crime.",
+      "tags": [
+        "hip hop",
+        "old school",
+        "social commentary",
+        "rap",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "The Message (Grandmaster Flash and the Furious Five song)",
+          "url": "https://en.wikipedia.org/wiki/The_Message_(Grandmaster_Flash_and_the_Furious_Five_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "no-scrubs",
+      "title": "No Scrubs",
+      "artist": "TLC",
+      "version": "FanMail album single (1999), straight R&B version",
+      "language": "unknown",
+      "description": "R&B and hip-pop at a moderate 100 BPM, with an acoustic-guitar-style keyboard beat, airy electronic-guitar texture and lead and background vocals.",
+      "tags": [
+        "rhythm and blues",
+        "hip pop",
+        "moderate",
+        "100 BPM",
+        "guitar",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "No Scrubs",
+          "url": "https://en.wikipedia.org/wiki/No_Scrubs",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "crazy-in-love",
+      "title": "Crazy in Love",
+      "artist": "Beyoncé featuring Jay-Z",
+      "version": "Dangerously in Love album recording (2003)",
+      "language": "unknown",
+      "description": "Pop and R&B with hip-hop, funk and soul influence, built around a sampled horn hook, hip-hop beat, big drums and brass. Its moderate tempo is about 100 BPM.",
+      "tags": [
+        "rhythm and blues",
+        "pop",
+        "hip hop",
+        "funk",
+        "soul",
+        "100 BPM",
+        "horns",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Crazy in Love",
+          "url": "https://en.wikipedia.org/wiki/Crazy_in_Love",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "untitled-how-does-it-feel",
+      "title": "Untitled (How Does It Feel)",
+      "artist": "D'Angelo",
+      "version": "Voodoo album version (2000), not radio edit",
+      "language": "unknown",
+      "description": "Neo-soul recording produced by D'Angelo and Raphael Saadiq, with Saadiq contributing bass and musical arrangements; the album version runs longer than the radio edit.",
+      "tags": [
+        "neo soul",
+        "rhythm and blues",
+        "bass",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Untitled (How Does It Feel)",
+          "url": "https://en.wikipedia.org/wiki/Untitled_(How_Does_It_Feel)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "redbone",
+      "title": "Redbone",
+      "artist": "Childish Gambino",
+      "version": "Awaken, My Love! album recording (2016)",
+      "language": "unknown",
+      "description": "R&B and psychedelic-funk recording with Childish Gambino singing rather than rapping, supported by bass, drums, keyboards and layered vocal production.",
+      "tags": [
+        "rhythm and blues",
+        "psychedelic funk",
+        "bass",
+        "drums",
+        "keyboard",
+        "singing",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Redbone (song)",
+          "url": "https://en.wikipedia.org/wiki/Redbone_(song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "titanium",
+      "title": "Titanium",
+      "artist": "David Guetta featuring Sia",
+      "version": "Nothing but the Beat album version (2011)",
+      "language": "unknown",
+      "description": "House and urban-dance track at 126 BPM, combining electronic production with Sia's lead vocal performance.",
+      "tags": [
+        "house",
+        "dance",
+        "electronic",
+        "126 BPM",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Titanium (David Guetta song)",
+          "url": "https://en.wikipedia.org/wiki/Titanium_(David_Guetta_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "levels",
+      "title": "Levels",
+      "artist": "Avicii",
+      "version": "Original version (2011), not radio edit",
+      "language": "unknown",
+      "description": "Progressive-house and EDM dance track built around a synth lead and chord progression, with a sampled Etta James vocal during a brief intermission.",
+      "tags": [
+        "progressive house",
+        "electronic",
+        "dance",
+        "synthesizer",
+        "sampled vocal"
+      ],
+      "sources": [
+        {
+          "title": "Levels (Avicii song)",
+          "url": "https://en.wikipedia.org/wiki/Levels_(Avicii_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "one-more-time",
+      "title": "One More Time",
+      "artist": "Daft Punk",
+      "version": "Discovery album recording (2000)",
+      "language": "unknown",
+      "description": "French-house, disco and club track with processed Auto-Tuned vocals by Romanthony and a sample from Eddie Johns's More Spell on You.",
+      "tags": [
+        "French house",
+        "disco",
+        "club",
+        "electropop",
+        "dance",
+        "processed vocal"
+      ],
+      "sources": [
+        {
+          "title": "One More Time (Daft Punk song)",
+          "url": "https://en.wikipedia.org/wiki/One_More_Time_(Daft_Punk_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "stronger-kanye",
+      "title": "Stronger",
+      "artist": "Kanye West",
+      "version": "Graduation album version (2007)",
+      "language": "unknown",
+      "description": "Maximalist hip-hop and electronica at 104 BPM, driven by bright synths and a chopped, vocoder-affected sample of Daft Punk's Harder, Better, Faster, Stronger.",
+      "tags": [
+        "hip hop",
+        "electronica",
+        "electronic",
+        "disco",
+        "104 BPM",
+        "synthesizer",
+        "rap",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Stronger (Kanye West song)",
+          "url": "https://en.wikipedia.org/wiki/Stronger_(Kanye_West_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "gasolina",
+      "title": "Gasolina",
+      "artist": "Daddy Yankee",
+      "version": "Barrio Fino album recording (2004)",
+      "language": "Spanish",
+      "description": "Spanish-language reggaeton recording by Daddy Yankee, with a call-and-response chorus sung by Glory; it became an early reggaeton crossover hit.",
+      "tags": [
+        "reggaeton",
+        "Latin",
+        "dance",
+        "Spanish",
+        "rap",
+        "call and response",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Gasolina",
+          "url": "https://en.wikipedia.org/wiki/Gasolina",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "waka-waka",
+      "title": "Waka Waka (This Time for Africa)",
+      "artist": "Shakira featuring Freshlyground",
+      "version": "English FIFA World Cup version (2010)",
+      "language": "English and Xhosa",
+      "description": "Pop, Afro-fusion, Afropop and soca at 127 BPM, with Southern African guitar and a Xhosa verse by Freshlyground singer Zolani Mahola. It was the official 2010 FIFA World Cup song.",
+      "tags": [
+        "Afro fusion",
+        "Afropop",
+        "soca",
+        "dance",
+        "127 BPM",
+        "football",
+        "World Cup",
+        "English",
+        "Xhosa",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Waka Waka (This Time for Africa)",
+          "url": "https://en.wikipedia.org/wiki/Waka_Waka_(This_Time_for_Africa)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "calm-down-rema",
+      "title": "Calm Down",
+      "artist": "Rema",
+      "version": "Rave & Roses original solo version (2022), not Selena Gomez remix",
+      "language": "unknown",
+      "description": "Afrobeats and Afro-rave pop at 107 BPM, described as warm, bright, captivating and feel-good; this card refers to Rema's original solo recording.",
+      "tags": [
+        "Afrobeats",
+        "Afro rave",
+        "pop",
+        "feel good",
+        "warm",
+        "bright",
+        "107 BPM",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Calm Down (Rema song)",
+          "url": "https://en.wikipedia.org/wiki/Calm_Down_(Rema_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "water-tyla",
+      "title": "Water",
+      "artist": "Tyla",
+      "version": "Original solo single (2023), not remix",
+      "language": "unknown",
+      "description": "Pop and amapiano with R&B and Afrobeats elements, a prominent log drum, sensuous melodies and a moderately fast tempo of 117 BPM.",
+      "tags": [
+        "amapiano",
+        "rhythm and blues",
+        "Afrobeats",
+        "pop",
+        "dance",
+        "117 BPM",
+        "log drum",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Water (Tyla song)",
+          "url": "https://en.wikipedia.org/wiki/Water_(Tyla_song)",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "good-as-hell",
+      "title": "Good as Hell",
+      "artist": "Lizzo",
+      "version": "Original Coconut Oil EP recording (2016), not Ariana Grande remix",
+      "language": "unknown",
+      "description": "Soul-pop, R&B and pop-rap song whose lyrics and reception emphasize self-love, delivered with lead singing and rap-influenced pop phrasing.",
+      "tags": [
+        "soul pop",
+        "rhythm and blues",
+        "pop rap",
+        "self love",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Good as Hell",
+          "url": "https://en.wikipedia.org/wiki/Good_as_Hell",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "exact BPM",
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
+    },
+    {
+      "id": "cant-hold-us",
+      "title": "Can't Hold Us",
+      "artist": "Macklemore & Ryan Lewis featuring Ray Dalton",
+      "version": "The Heist album version (2012)",
+      "language": "unknown",
+      "description": "Pop-rap and worldbeat track with a fast 146 BPM tempo, tribal percussion, Macklemore's rap verses and a sung chorus by Ray Dalton.",
+      "tags": [
+        "pop rap",
+        "worldbeat",
+        "fast",
+        "146 BPM",
+        "percussion",
+        "rap",
+        "sung chorus",
+        "vocal"
+      ],
+      "sources": [
+        {
+          "title": "Can't Hold Us",
+          "url": "https://en.wikipedia.org/wiki/Can%27t_Hold_Us",
+          "provenance": "Wikipedia contributors; paraphrased summary, not independent corroboration"
+        }
+      ],
+      "retrieved_at": "2026-11-17",
+      "unknowns": [
+        "measured energy",
+        "listener-specific mood or activity fit",
+        "vocal language",
+        "absence of screaming or other unmentioned vocal sounds"
+      ]
     }
   ]
 }
