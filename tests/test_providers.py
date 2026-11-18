@@ -12,9 +12,11 @@ from unittest.mock import Mock, patch
 import pytest
 import requests
 
-from src.providers import (DEFAULT_MODEL, GeminiProvider, MusicBrainzProvider,
-                           RateLimiter, Settings, TavilyProvider, TTLCache, http_json,
-                           optional_text_field, provider_error, strings, text_field)
+from src.providers import (DEFAULT_EMBEDDING_MODEL, DEFAULT_MODEL, EMBEDDING_DIMENSIONS,
+                           GEMINI_RETRY_PAUSE, GeminiEmbeddingProvider, GeminiProvider,
+                           MUSIC_SOURCE_DOMAINS, MusicBrainzProvider, RateLimiter, Settings,
+                           TavilyProvider, TTLCache,
+                           http_json, optional_text_field, provider_error, strings, text_field)
 from src.models import (CHECK_STATUSES, CRITERION_KINDS, INTENT_FACETS, Candidate,
                         ConstraintCheck, DiscoveryError, Evidence, MusicRequest, ParsedIntent,
                         PreferenceCheck, Recommendation, SupportedClaim, TasteCriterion)
@@ -215,7 +217,28 @@ def test_settings_apply_defaults_and_hide_secrets():
     settings = Settings.from_mapping({"TAVILY_API_KEY": " tavily-secret ", "GEMINI_API_KEY": "gemini-secret"})
     assert settings.tavily_api_key == "tavily-secret"
     assert settings.gemini_model == DEFAULT_MODEL
+    assert settings.gemini_embedding_model == DEFAULT_EMBEDDING_MODEL
+    assert settings.semantic_retrieval_enabled is True
+    assert settings.music_source_focus_enabled is True
     assert "secret" not in repr(settings)
+
+
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", "off"])
+def test_settings_can_disable_semantic_retrieval(value):
+    """The environment provides a small kill switch without changing other discovery settings."""
+    settings = Settings.from_mapping({"TAVILY_API_KEY": "t", "GEMINI_API_KEY": "g",
+                                      "SEMANTIC_RETRIEVAL_ENABLED": value,
+                                      "GEMINI_EMBEDDING_MODEL": "custom-embedding"})
+    assert settings.semantic_retrieval_enabled is False
+    assert settings.gemini_embedding_model == "custom-embedding"
+
+
+@pytest.mark.parametrize("value", ["0", "false", "FALSE", "off"])
+def test_settings_can_disable_music_source_focus(value):
+    """The focused search can be disabled without affecting the other provider settings."""
+    settings = Settings.from_mapping({"TAVILY_API_KEY": "t", "GEMINI_API_KEY": "g",
+                                      "MUSIC_SOURCE_FOCUS_ENABLED": value})
+    assert settings.music_source_focus_enabled is False
 
 
 def test_provider_failure_never_exposes_secret(caplog):
@@ -283,6 +306,65 @@ def test_gemini_failures_map_to_safe_errors(outcome, code):
         GeminiProvider(Settings("fixture", "fixture"), client=client).analyze_request(MusicRequest("jazz"))
     assert exc.value.code == code
     assert "fixture-secret" not in str(exc.value)
+
+
+INTENT_ANSWER = {"criteria": [{"facet": "genre", "kind": "preference", "value": "jazz",
+                               "weight": 2, "source_text": "jazz"}], "search_queries": ["jazz songs"]}
+
+
+def flaky_client(*outcomes):
+    """Build a fake Gemini client that raises or answers in order; an int is a failure with that HTTP status."""
+    effects = [failure(code=o) if isinstance(o, int) else SimpleNamespace(text=json.dumps(o)) for o in outcomes]
+    return SimpleNamespace(models=SimpleNamespace(generate_content=Mock(side_effect=effects)))
+
+
+def test_a_gemini_503_is_retried_once_after_a_pause_and_uses_one_of_the_four_calls(monkeypatch, caplog):
+    """A 503 is retried once after the pause, and the retry counts toward the four-call limit."""
+    sleeps = []
+    monkeypatch.setattr("src.providers.time.sleep", sleeps.append)  # the test never actually waits
+    client = flaky_client(503, INTENT_ANSWER)
+    provider = GeminiProvider(Settings("fixture", "fixture"), client=client)
+    with caplog.at_level(logging.INFO, logger="src.providers"):
+        intent = provider.analyze_request(MusicRequest("jazz"))
+    assert intent.search_queries == ["jazz songs"]
+    assert client.models.generate_content.call_count == 2 and provider.calls == 2
+    assert sleeps == [GEMINI_RETRY_PAUSE]
+    assert "provider_retry provider=Gemini call=1 http_status=503" in caplog.text
+    assert "fixture-secret" not in caplog.text
+
+
+def test_a_second_gemini_503_is_reported_not_retried_again(monkeypatch):
+    """After the one retry a second 503 becomes a safe provider_unavailable error."""
+    monkeypatch.setattr("src.providers.time.sleep", lambda seconds: None)
+    client = flaky_client(503, 503, INTENT_ANSWER)
+    with pytest.raises(DiscoveryError) as exc:
+        GeminiProvider(Settings("fixture", "fixture"), client=client).analyze_request(MusicRequest("jazz"))
+    assert exc.value.code == "provider_unavailable" and "fixture-secret" not in str(exc.value)
+    assert client.models.generate_content.call_count == 2
+
+
+@pytest.mark.parametrize("status,code", [(429, "quota"), (403, "authentication"), (500, "provider_unavailable"),
+                                         (404, "provider_unavailable")])
+def test_other_gemini_failures_are_not_retried(status, code, monkeypatch):
+    """Only a 503 is worth retrying; quota, authentication and other errors fail at once."""
+    monkeypatch.setattr("src.providers.time.sleep", lambda seconds: pytest.fail("must not wait"))
+    client = flaky_client(status, INTENT_ANSWER)
+    with pytest.raises(DiscoveryError) as exc:
+        GeminiProvider(Settings("fixture", "fixture"), client=client).analyze_request(MusicRequest("jazz"))
+    assert exc.value.code == code
+    assert client.models.generate_content.call_count == 1
+
+
+def test_a_gemini_503_on_the_last_allowed_call_is_not_retried(monkeypatch):
+    """The retry never pushes a request past the four-call limit."""
+    monkeypatch.setattr("src.providers.time.sleep", lambda seconds: pytest.fail("must not wait"))
+    client = flaky_client(503, INTENT_ANSWER)
+    provider = GeminiProvider(Settings("fixture", "fixture"), client=client)
+    provider.calls = 3
+    with pytest.raises(DiscoveryError) as exc:
+        provider.analyze_request(MusicRequest("jazz"))
+    assert exc.value.code == "provider_unavailable"
+    assert client.models.generate_content.call_count == 1 and provider.calls == 4
 
 
 def test_gemini_parses_recommendations_and_sends_check_ids():
@@ -486,6 +568,27 @@ def test_provider_errors_map_to_a_safe_code_and_never_echo_the_original_message(
     assert "fixture-secret" not in str(safe)
 
 
+def test_provider_failure_log_records_the_status_and_error_type_without_the_message(caplog):
+    """The failure log names the HTTP status, status name and error class so a coarse code can be diagnosed."""
+    with caplog.at_level(logging.WARNING, logger="src.providers"):
+        provider_error("Gemini", failure(code=503, status="UNAVAILABLE"))
+    assert "provider_failure provider=Gemini code=provider_unavailable " \
+           "http_status=503 status_name=UNAVAILABLE error_type=RuntimeError" in caplog.text
+    assert "fixture-secret" not in caplog.text
+
+
+@pytest.mark.parametrize("error", [
+    failure(code="fixture-secret", status="fixture-secret leaked"),  # neither is a plain status
+    failure(response=SimpleNamespace(status_code="fixture-secret")),
+], ids=["sdk-attributes", "response-status"])
+def test_provider_failure_log_drops_status_values_that_are_not_plain_statuses(error, caplog):
+    """A status that is not an integer, or a name that is not upper-case words, is logged as None."""
+    with caplog.at_level(logging.WARNING, logger="src.providers"):
+        provider_error("Gemini", error)
+    assert "http_status=None status_name=None error_type=RuntimeError" in caplog.text
+    assert "fixture-secret" not in caplog.text
+
+
 class TrackedResponse(Response):
     """Fake response that remembers whether it was closed."""
     closed = False
@@ -547,6 +650,9 @@ def test_tavily_sends_at_most_two_trimmed_queries_and_keeps_bounded_results():
     assert args == ("https://api.tavily.com/search",) and kwargs["headers"] == {"Authorization": "Bearer fixture-key"}
     assert len(kwargs["json"]["query"]) == 390 and kwargs["json"]["max_results"] == 6
     assert kwargs["json"]["include_raw_content"] is False
+    assert "include_domains" not in kwargs["json"]
+    assert session.calls[1][1]["json"]["query"] == "second jazz query"
+    assert session.calls[1][1]["json"]["include_domains"] == list(MUSIC_SOURCE_DOMAINS)
     assert [e.id for e in evidence] == [f"web_{n}" for n in range(1, 7)]  # six of eight kept; the repeat query adds none
     assert all(e.kind == "web" and len(e.title) == 300 and len(e.text) == 3000 for e in evidence)
     assert evidence[0].retrieved_at and evidence[0].retrieved_at.endswith("+00:00")
@@ -574,7 +680,155 @@ def test_tavily_cache_is_not_shared_between_api_keys():
     one.search_web(MusicRequest("jazz"), intent)
     one.search_web(MusicRequest("jazz"), intent)
     two.search_web(MusicRequest("jazz"), intent)
-    assert len(session.calls) == 2  # the same key reuses the cache; another key does not see it
+    assert len(session.calls) == 4  # each key gets one general and one focused entry; the first key reuses both
+
+
+def test_tavily_reuses_one_query_for_the_focused_search_and_can_disable_focus():
+    """A single analyzed query still gets one general and one focused attempt within the two-call cap."""
+    session = Session({"results": []})
+    intent = ParsedIntent([], ["instrumental jazz songs"])
+    TavilyProvider("fixture", session=session, cache=TTLCache()).search_web(MusicRequest("jazz"), intent)
+    assert [call[1]["json"]["query"] for call in session.calls] == ["instrumental jazz songs"] * 2
+    assert "include_domains" not in session.calls[0][1]["json"]
+    assert session.calls[1][1]["json"]["include_domains"] == list(MUSIC_SOURCE_DOMAINS)
+
+    disabled = Session({"results": []})
+    TavilyProvider("fixture", session=disabled, cache=TTLCache(),
+                   music_source_focus_enabled=False).search_web(MusicRequest("jazz"), intent)
+    assert len(disabled.calls) == 1
+    assert "include_domains" not in disabled.calls[0][1]["json"]
+
+
+def test_tavily_prioritizes_real_music_hosts_then_score_and_reissues_ids():
+    """Specialist hosts win the merge, but lookalike domains remain ordinary general-web evidence."""
+    class SequencedSession:
+        def __init__(self):
+            self.calls = []
+            self.responses = [
+                {"results": [
+                    {"title": "General", "content": "jazz song", "score": 0.99,
+                     "url": "https://example.org/general"},
+                    {"title": "Lookalike", "content": "jazz song", "score": 1.0,
+                     "url": "https://pitchfork.com.example.org/review"},
+                ]},
+                {"results": [
+                    {"title": "Pitchfork", "content": "jazz song", "score": 0.2,
+                     "url": "https://reviews.pitchfork.com/albums/example"},
+                    {"title": "Rolling Stone", "content": "jazz song", "score": 0.8,
+                     "url": "https://www.rollingstone.com/music/example"},
+                ]},
+            ]
+
+        def post(self, *args, **kwargs):
+            self.calls.append((args, kwargs))
+            return Response(self.responses.pop(0))
+
+    evidence = TavilyProvider("fixture", session=SequencedSession(), cache=TTLCache()).search_web(
+        MusicRequest("jazz"), ParsedIntent([], ["jazz songs"]))
+    assert [(item.id, item.title) for item in evidence] == [
+        ("web_1", "Rolling Stone"), ("web_2", "Pitchfork"),
+        ("web_3", "Lookalike"), ("web_4", "General"),
+    ]
+
+
+def test_tavily_keeps_general_results_when_the_focused_search_fails(caplog):
+    """A focused-source outage degrades safely after a successful general search."""
+    class FocusFailureSession:
+        def __init__(self):
+            self.calls = 0
+
+        def post(self, *args, **kwargs):
+            self.calls += 1
+            if self.calls == 1:
+                return Response({"results": [{"title": "General", "content": "jazz song",
+                                                "url": "https://example.org/general"}]})
+            return Response({"message": "fixture-secret"}, 503)
+
+    with caplog.at_level(logging.INFO):
+        evidence = TavilyProvider("fixture-secret", session=FocusFailureSession(),
+                                  cache=TTLCache()).search_web(
+            MusicRequest("jazz"), ParsedIntent([], ["jazz songs"]))
+    assert [item.title for item in evidence] == ["General"]
+    assert "retrieval_degraded provider=Tavily mode=music code=provider_unavailable" in caplog.text
+    assert "fixture-secret" not in caplog.text
+
+
+# --- Gemini embeddings --------------------------------------------------------------------
+
+def embedding_vector(first=1.0, second=0.0):
+    """Build one nonzero vector with the configured output size."""
+    return [first, second, *([0.0] * (EMBEDDING_DIMENSIONS - 2))]
+
+
+def embedding_response(*vectors):
+    """Build the part of an SDK embedding response used by the provider."""
+    return SimpleNamespace(embeddings=[SimpleNamespace(values=vector) for vector in vectors])
+
+
+def embedding_provider(*responses):
+    """Build an embedding provider with isolated caches and a recording fake client."""
+    models = SimpleNamespace(embed_content=Mock(side_effect=responses))
+    client = SimpleNamespace(models=models)
+    provider = GeminiEmbeddingProvider(Settings("fixture", "fixture"), client=client,
+        document_cache=TTLCache(), query_cache=TTLCache())
+    return provider, models.embed_content
+
+
+def test_embedding_provider_uses_asymmetric_retrieval_tasks_and_cosine_scores():
+    """Documents and the query use their matching retrieval task types and 768 dimensions."""
+    provider, embed = embedding_provider(
+        embedding_response(embedding_vector(1, 0), embedding_vector(0, 1)),
+        embedding_response(embedding_vector(1, 0)),
+    )
+    documents = [("card_one", "One", "first document"),
+                 ("card_two", "Two", "second document")]
+    assert provider.score("first meaning", documents) == {"card_one": 1.0, "card_two": 0.0}
+    document_call, query_call = embed.call_args_list
+    assert document_call.kwargs["model"] == DEFAULT_EMBEDDING_MODEL
+    assert document_call.kwargs["contents"] == [
+        "title: One | text: first document", "title: Two | text: second document"]
+    assert document_call.kwargs["config"] == {
+        "task_type": "RETRIEVAL_DOCUMENT", "output_dimensionality": EMBEDDING_DIMENSIONS}
+    assert query_call.kwargs["contents"] == "first meaning"
+    assert query_call.kwargs["config"]["task_type"] == "RETRIEVAL_QUERY"
+
+
+def test_embedding_provider_caches_queries_and_document_fingerprints():
+    """Repeated content uses both caches; changed document text invalidates only the document batch."""
+    provider, embed = embedding_provider(
+        embedding_response(embedding_vector()), embedding_response(embedding_vector()),
+        embedding_response(embedding_vector()),
+    )
+    documents = [("card_one", "One", "first version")]
+    provider.score("same query", documents)
+    provider.score("same query", documents)
+    provider.score("same query", [("card_one", "One", "changed version")])
+    assert embed.call_count == 3
+    assert embed.call_args_list[-1].kwargs["config"]["task_type"] == "RETRIEVAL_DOCUMENT"
+
+
+@pytest.mark.parametrize("response", [
+    SimpleNamespace(embeddings=[]),
+    embedding_response([1.0]),
+    embedding_response([0.0] * EMBEDDING_DIMENSIONS),
+    embedding_response([float("nan"), *([0.0] * (EMBEDDING_DIMENSIONS - 1))]),
+], ids=["missing", "wrong-dimension", "zero", "non-finite"])
+def test_embedding_provider_rejects_malformed_vectors(response):
+    """Malformed vectors never reach the hybrid ranker."""
+    provider, _ = embedding_provider(response)
+    with pytest.raises(DiscoveryError) as exc:
+        provider.score("query", [("card_one", "One", "document")])
+    assert exc.value.code == "invalid_response"
+
+
+def test_embedding_provider_maps_failures_without_logging_query_or_secret(caplog):
+    """A provider failure is safe and leaves the caller free to use lexical retrieval."""
+    provider, embed = embedding_provider()
+    embed.side_effect = RuntimeError("fixture-secret query words")
+    with caplog.at_level(logging.WARNING), pytest.raises(DiscoveryError) as exc:
+        provider.score("private query words", [("card_one", "One", "document")])
+    assert exc.value.code == "provider_unavailable"
+    assert "fixture-secret" not in caplog.text and "private query words" not in caplog.text
 
 
 # --- Gemini client, request contract and parsing -------------------------------------------
@@ -654,6 +908,66 @@ def test_an_explicit_exclusion_is_accepted_once_a_hard_criterion_quotes_it():
     provider = GeminiProvider(Settings("fixture", "fixture"), client=gemini_client([payload]))
     intent = provider.analyze_request(MusicRequest("piano no vocals"))
     assert [(c.kind, c.value) for c in intent.criteria] == [("must_avoid", "vocals")]
+
+
+def test_clean_singing_graded_as_a_preference_is_promoted_instead_of_rejecting_the_request():
+    """Gemini's real answer to "clean singing metal with no screaming" is kept, with clean singing made a requirement."""
+    payload = {"criteria": [
+        {"facet": "genre", "kind": "preference", "value": "metal", "weight": 2, "source_text": "metal"},
+        {"facet": "vocals", "kind": "preference", "value": "clean singing", "weight": 2,
+         "source_text": "clean singing"},
+        {"facet": "vocals", "kind": "must_avoid", "value": "screaming", "weight": 3, "source_text": "no screaming"}],
+        "search_queries": ["metal clean vocals no screaming", "melodic metal clean singing"]}
+    provider = GeminiProvider(Settings("fixture", "fixture"), client=gemini_client([payload]))
+    intent = provider.analyze_request(MusicRequest("clean singing metal with no screaming"))
+    assert [(c.value, c.kind) for c in intent.criteria] == [
+        ("metal", "preference"), ("clean singing", "must_have"), ("screaming", "must_avoid")]
+    assert [c.value for c in intent.hard_criteria] == ["clean singing", "screaming"]
+    assert intent.search_queries == payload["search_queries"]
+
+
+@pytest.mark.parametrize("request_text,said,expected", [
+    ("piano with no vocals", "no vocals", "must_avoid"),
+    ("piano sem voz", "sem voz", "must_avoid"),
+    ("rock without screaming please", "without screaming", "must_avoid"),
+    ("instrumental piano", "instrumental", "must_have"),
+    ("clean singing please", "clean singing", "must_have"),
+])
+def test_a_soft_vocals_criterion_is_promoted_to_the_polarity_of_its_phrase(request_text, said, expected):
+    """A soft vocals criterion becomes must_avoid for "no ..." phrases and must_have for the others."""
+    payload = {"criteria": [{"facet": "vocals", "kind": "preference", "value": said, "weight": 2,
+                             "source_text": said}], "search_queries": ["some songs"]}
+    provider = GeminiProvider(Settings("fixture", "fixture"), client=gemini_client([payload]))
+    assert [c.kind for c in provider.analyze_request(MusicRequest(request_text)).criteria] == [expected]
+
+
+def test_only_a_vocals_criterion_can_be_promoted():
+    """A soft criterion in another facet that quotes the phrase is still rejected, as before."""
+    payload = {"criteria": [{"facet": "genre", "kind": "preference", "value": "clean singing", "weight": 2,
+                             "source_text": "clean singing"}], "search_queries": ["some songs"]}
+    provider = GeminiProvider(Settings("fixture", "fixture"), client=gemini_client([payload]))
+    with pytest.raises(DiscoveryError) as exc:
+        provider.analyze_request(MusicRequest("clean singing please"))
+    assert exc.value.code == "invalid_response"
+
+
+def test_a_phrase_the_model_dropped_is_still_rejected_even_when_another_one_is_promotable():
+    """Promotion never covers for a phrase that no criterion mentions."""
+    payload = {"criteria": [{"facet": "vocals", "kind": "preference", "value": "clean singing", "weight": 2,
+                             "source_text": "clean singing"}], "search_queries": ["some songs"]}
+    provider = GeminiProvider(Settings("fixture", "fixture"), client=gemini_client([payload]))
+    with pytest.raises(DiscoveryError) as exc:
+        provider.analyze_request(MusicRequest("clean singing metal with no screaming"))
+    assert exc.value.code == "invalid_response"
+
+
+def test_the_analysis_prompt_names_the_vocal_phrases_that_must_be_hard_criteria():
+    """The prompt tells Gemini these phrases are explicit, so they come back as hard criteria in the first place."""
+    payload = {"criteria": [], "search_queries": ["some songs"]}
+    client = gemini_client([payload])
+    GeminiProvider(Settings("fixture", "fixture"), client=client).analyze_request(MusicRequest("some songs"))
+    task = json.loads(client.models.generate_content.call_args.kwargs["contents"])["task"]
+    assert "clean singing" in task and "no screaming" in task and "never preference" in task
 
 
 @pytest.mark.parametrize("facet,said,expected", [

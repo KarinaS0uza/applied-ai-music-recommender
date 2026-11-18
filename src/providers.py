@@ -9,23 +9,42 @@ import hashlib
 import html
 import json
 import logging
+import math
 import os
 import re
 import threading
 import time
+from urllib.parse import urlsplit
 from uuid import UUID
 
 import requests
 
 from src.models import (Candidate, ConstraintCheck, DiscoveryError, Evidence,
                         MusicRequest, ParsedIntent, PreferenceCheck, Recommendation,
-                        SupportedClaim, TasteCriterion, VideoLink)
+                        SupportedClaim, TasteCriterion, TrackLink, VideoLink)
 from src.utils import normalize, safe_url
 from src.validation import criterion_key, validate_parsed_intent
 
 logger = logging.getLogger(__name__)
 DEFAULT_MODEL = "gemini-3.5-flash-lite"
+DEFAULT_EMBEDDING_MODEL = "gemini-embedding-001"
+EMBEDDING_DIMENSIONS = 768
+GEMINI_RETRY_PAUSE = 2  # seconds to wait before the single retry after a Gemini 503
 PROJECT_URL = "https://github.com/KarinaS0uza/applied-ai-music-recommender"
+MUSIC_SOURCE_DOMAINS = (
+    "allmusic.com",
+    "bandcamp.com",
+    "billboard.com",
+    "discogs.com",
+    "last.fm",
+    "musicbrainz.org",
+    "musicradar.com",
+    "npr.org",
+    "officialcharts.com",
+    "pitchfork.com",
+    "rollingstone.com",
+    "stereogum.com",
+)
 
 
 @dataclass(frozen=True)
@@ -37,6 +56,12 @@ class Settings:
     musicbrainz_contact: str = PROJECT_URL
     # Optional: without it, results keep their YouTube and Spotify search links.
     youtube_api_key: str = field(default="", repr=False)
+    # Optional pair: without both, results keep their Spotify search link.
+    spotify_client_id: str = field(default="", repr=False)
+    spotify_client_secret: str = field(default="", repr=False)
+    gemini_embedding_model: str = DEFAULT_EMBEDDING_MODEL
+    semantic_retrieval_enabled: bool = True
+    music_source_focus_enabled: bool = True
 
     @classmethod
     def from_mapping(cls, values=None):
@@ -48,9 +73,23 @@ class Settings:
         youtube_key = str(values.get("YOUTUBE_API_KEY", "")).strip()
         if youtube_key.startswith(("YOUR_", "replace-")):
             youtube_key = ""
+        spotify_id, spotify_secret = (str(values.get(name, "")).strip()
+                                      for name in ("SPOTIFY_CLIENT_ID", "SPOTIFY_CLIENT_SECRET"))
+        if (not spotify_id or not spotify_secret
+                or spotify_id.startswith(("YOUR_", "replace-")) or spotify_secret.startswith(("YOUR_", "replace-"))):
+            spotify_id = spotify_secret = ""  # Spotify needs both halves, so half a pair disables it
+        semantic_enabled = str(values.get("SEMANTIC_RETRIEVAL_ENABLED", "true")).strip().casefold() \
+            not in {"0", "false", "off"}
+        music_source_focus_enabled = str(values.get("MUSIC_SOURCE_FOCUS_ENABLED", "true")).strip().casefold() \
+            not in {"0", "false", "off"}
         return cls(*keys, gemini_model=str(values.get("GEMINI_MODEL", DEFAULT_MODEL)),
                    musicbrainz_contact=str(values.get("MUSICBRAINZ_CONTACT", PROJECT_URL)),
-                   youtube_api_key=youtube_key)
+                   youtube_api_key=youtube_key,
+                   spotify_client_id=spotify_id, spotify_client_secret=spotify_secret,
+                   gemini_embedding_model=str(values.get(
+                       "GEMINI_EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)),
+                   semantic_retrieval_enabled=semantic_enabled,
+                   music_source_focus_enabled=music_source_focus_enabled)
 
 
 class TTLCache:
@@ -81,11 +120,18 @@ class TTLCache:
 
 
 _web_cache = TTLCache()
+_embedding_document_cache = TTLCache(ttl=86_400, capacity=16)
+_embedding_query_cache = TTLCache(ttl=900, capacity=128)
+
+
+def error_status(error):
+    """Return the HTTP status a provider error carries (requests keeps it on .response, google-genai on .code)."""
+    return getattr(getattr(error, "response", None), "status_code", None) or getattr(error, "code", None)
 
 
 def provider_error(provider, error):
     """Convert a provider failure to a safe DiscoveryError without exposing secrets."""
-    status = getattr(getattr(error, "response", None), "status_code", None) or getattr(error, "code", None)
+    status = error_status(error)
     if isinstance(error, (requests.Timeout, TimeoutError)) or "timeout" in type(error).__name__.lower():
         code, message = "timeout", f"{provider} timed out. Please try again later."
     elif status in (401, 403):
@@ -94,7 +140,15 @@ def provider_error(provider, error):
         code, message = "quota", f"{provider} is rate limited or out of quota. Please try again later."
     else:
         code, message = "provider_unavailable", f"{provider} is unavailable. Please try again later."
-    logger.warning("provider_failure provider=%s code=%s", provider, code)
+    # The safe code above is coarse (every 5xx, 404 and network error is "provider_unavailable"), so the
+    # log also records the numeric HTTP status, google-genai's status name (such as UNAVAILABLE or
+    # NOT_FOUND) and the exception class. Each is checked to be a plain status, so the original message
+    # and anything secret in it never reach the log.
+    status_name = getattr(error, "status", None)
+    logger.warning("provider_failure provider=%s code=%s http_status=%s status_name=%s error_type=%s",
+                   provider, code, status if isinstance(status, int) else None,
+                   status_name if isinstance(status_name, str) and re.fullmatch(r"[A-Z_]{3,40}", status_name) else None,
+                   type(error).__name__)
     return DiscoveryError(code, message)
 
 
@@ -121,35 +175,62 @@ def http_json(session, method, url, **kwargs):
 
 class TavilyProvider:
     """Searches the web through Tavily for pages about the request."""
-    def __init__(self, api_key, *, session=None, cache=None):
+    def __init__(self, api_key, *, session=None, cache=None, music_source_focus_enabled=True,
+                 music_source_domains=MUSIC_SOURCE_DOMAINS):
         """Store the API key and the HTTP session and cache to use."""
         self._key = api_key
         self.session = session or requests.Session()
         self.cache = cache if cache is not None else _web_cache
+        self.music_source_focus_enabled = music_source_focus_enabled
+        self.music_source_domains = tuple(music_source_domains)
 
     def search_web(self, request: MusicRequest, intent: ParsedIntent) -> list[Evidence]:
         """Search the web for the intent's queries and return the usable pages as evidence."""
         queries = [query[:390] for query in intent.search_queries[:2]]
         relevant_terms = _relevant_search_terms(intent)
+        if not queries:
+            return []
+        searches = [(queries[0], "general", ())]
+        if self.music_source_focus_enabled:
+            searches.append((queries[1] if len(queries) > 1 else queries[0],
+                             "music", self.music_source_domains))
+        elif len(queries) > 1:
+            searches.append((queries[1], "general", ()))
+
         collected, urls = [], set()
-        for query in queries:
-            key = (hashlib.sha256(self._key.encode()).hexdigest(), query)
+        encounter = 0
+        for query, mode, domains in searches:
+            key = (hashlib.sha256(self._key.encode()).hexdigest(), query, mode, domains)
             data = self.cache.get(key)
             hit = data is not None
             started = time.monotonic()
             if not hit:
+                payload = {"query": query, "search_depth": "basic", "max_results": 6,
+                           "include_answer": False, "include_raw_content": False,
+                           "auto_parameters": False}
+                if domains:
+                    payload["include_domains"] = list(domains)
                 try:
                     data = http_json(self.session, "post", "https://api.tavily.com/search",
                                      headers={"Authorization": f"Bearer {self._key}"},
-                                     json={"query": query, "search_depth": "basic", "max_results": 6,
-                                           "include_answer": False, "include_raw_content": False,
-                                           "auto_parameters": False})
-                except DiscoveryError:
+                                     json=payload)
+                except DiscoveryError as error:
+                    if mode == "music":
+                        logger.warning("retrieval_degraded provider=Tavily mode=music code=%s", error.code)
+                        continue
                     raise
                 except (requests.RequestException, ValueError) as error:
-                    raise provider_error("Tavily", error) from None
+                    safe_error = provider_error("Tavily", error)
+                    if mode == "music":
+                        logger.warning("retrieval_degraded provider=Tavily mode=music code=%s", safe_error.code)
+                        continue
+                    raise safe_error from None
                 if not isinstance(data, dict) or not isinstance(data.get("results"), list):
-                    raise DiscoveryError("invalid_response", "Tavily returned an unreadable response.")
+                    error = DiscoveryError("invalid_response", "Tavily returned an unreadable response.")
+                    if mode == "music":
+                        logger.warning("retrieval_degraded provider=Tavily mode=music code=%s", error.code)
+                        continue
+                    raise error
                 data = {"results": data["results"][:6], "retrieved_at": datetime.now(timezone.utc).isoformat()}
                 self.cache.put(key, data)
             for item in data["results"]:
@@ -160,15 +241,46 @@ class TavilyProvider:
                 if (safe_url(url) and isinstance(content, str) and content.strip() and url not in urls
                         and (not relevant_terms or relevant_terms.intersection(haystack))):
                     urls.add(url)
-                    collected.append(Evidence(f"web_{len(collected)+1}", "web", str(item.get("title", ""))[:300],
-                                              content[:3000], url, data["retrieved_at"]))
-            logger.info("retrieval provider=Tavily cache_hit=%s sources=%d latency_ms=%d", hit, len(collected),
-                        (time.monotonic() - started) * 1000)
-        return collected
+                    score = item.get("score")
+                    if isinstance(score, bool) or not isinstance(score, (int, float)) or not math.isfinite(score):
+                        score = None
+                    collected.append({
+                        "focused": _is_music_source(url, self.music_source_domains),
+                        "score": score,
+                        "encounter": encounter,
+                        "title": str(item.get("title", ""))[:300],
+                        "text": content[:3000],
+                        "url": url,
+                        "retrieved_at": data["retrieved_at"],
+                    })
+                    encounter += 1
+            logger.info("retrieval provider=Tavily mode=%s cache_hit=%s sources=%d latency_ms=%d",
+                        mode, hit, len(collected), (time.monotonic() - started) * 1000)
+        collected.sort(key=lambda item: (
+            not item["focused"],
+            -(item["score"] if item["score"] is not None else -math.inf),
+            item["encounter"],
+            item["url"],
+        ))
+        return [Evidence(f"web_{index}", "web", item["title"], item["text"], item["url"],
+                         item["retrieved_at"])
+                for index, item in enumerate(collected[:12], 1)]
 
 
-_SEARCH_STOP = {"a", "an", "and", "by", "for", "from", "in", "is", "music", "recording",
-                "recordings", "song", "songs", "the", "to", "track", "tracks", "with"}
+def _is_music_source(url: str, domains=MUSIC_SOURCE_DOMAINS) -> bool:
+    """Match an allowlisted hostname or its subdomain without accepting lookalike domains."""
+    try:
+        hostname = (urlsplit(url).hostname or "").rstrip(".").casefold()
+    except (TypeError, ValueError):
+        return False
+    return any(hostname == domain or hostname.endswith("." + domain) for domain in domains)
+
+
+# Words that appear in the queries' list-style phrasing ("best ... songs") match too many pages to prove
+# a result is about the request, so they do not count as relevant terms.
+_SEARCH_STOP = {"a", "an", "and", "album", "albums", "artist", "artists", "best", "by", "for", "from", "in",
+                "is", "music", "recommended", "recording", "recordings", "song", "songs", "the", "to", "top",
+                "track", "tracks", "with"}
 
 
 def _relevant_search_terms(intent: ParsedIntent) -> set[str]:
@@ -226,6 +338,119 @@ Output only JSON matching the supplied schema. Never put URLs in generated prose
 """
 
 
+# Vocal phrases that are always explicit, so the analysis must return them as hard criteria.
+_EXPLICIT_VOCAL_PHRASES = re.compile(
+    r"\b(?:no vocals|without vocals|no screaming|without screaming|clean singing|instrumental"
+    r"|sem vocais|sem voz|sem gritos)\b")
+
+
+def _quotes_phrase(criterion: TasteCriterion, phrase: str) -> bool:
+    """Tell whether a criterion's quoted words or value contain the phrase."""
+    return normalize(phrase) in normalize(criterion.source_text + " " + criterion.value)
+
+
+def _harden_explicit_vocals(request: MusicRequest, intent: ParsedIntent) -> ParsedIntent:
+    """Make sure every explicit vocal requirement or exclusion in the request is a hard criterion.
+
+    A vocals criterion that quotes the phrase but was graded a soft preference is promoted:
+    the model understood the request and only graded it too softly. It becomes must_avoid for
+    "no ..." phrases and must_have otherwise ("clean singing", "instrumental"). When no criterion
+    quotes the phrase at all, the model dropped the requirement, so this raises ValueError and
+    the whole analysis is rejected instead of silently ignoring it.
+    """
+    original = normalize(request.description + " " + (request.reference_song or ""))
+    criteria = list(intent.criteria)
+    for phrase in _EXPLICIT_VOCAL_PHRASES.findall(original):
+        if any(c.kind != "preference" and _quotes_phrase(c, phrase) for c in criteria):
+            continue
+        for index, criterion in enumerate(criteria):
+            if criterion.facet == "vocals" and criterion.kind == "preference" and _quotes_phrase(criterion, phrase):
+                kind = "must_avoid" if phrase.startswith(("no ", "without ", "sem ")) else "must_have"
+                criteria[index] = replace(criterion, kind=kind)
+                break
+        else:
+            raise ValueError()
+    return ParsedIntent(criteria, intent.search_queries)
+
+
+class GeminiEmbeddingProvider:
+    """Embed the local song cards and a request for optional semantic retrieval."""
+
+    def __init__(self, settings: Settings, *, client, document_cache=None, query_cache=None):
+        """Share the generation client and keep document/query caches independently bounded."""
+        self.client = client
+        self.model = settings.gemini_embedding_model
+        self.document_cache = document_cache if document_cache is not None else _embedding_document_cache
+        self.query_cache = query_cache if query_cache is not None else _embedding_query_cache
+
+    @staticmethod
+    def _vectors(response, expected):
+        """Return normalized vectors or reject a malformed embedding response."""
+        embeddings = getattr(response, "embeddings", None)
+        if not isinstance(embeddings, (list, tuple)) or len(embeddings) != expected:
+            raise DiscoveryError("invalid_response", "Semantic retrieval returned an unreadable response.")
+        vectors = []
+        for embedding in embeddings:
+            values = getattr(embedding, "values", None)
+            if not isinstance(values, (list, tuple)) or len(values) != EMBEDDING_DIMENSIONS:
+                raise DiscoveryError("invalid_response", "Semantic retrieval returned an unreadable response.")
+            try:
+                vector = tuple(float(value) for value in values)
+            except (TypeError, ValueError, OverflowError):
+                raise DiscoveryError("invalid_response", "Semantic retrieval returned an unreadable response.") from None
+            norm = math.sqrt(sum(value * value for value in vector))
+            if not math.isfinite(norm) or norm == 0 or any(not math.isfinite(value) for value in vector):
+                raise DiscoveryError("invalid_response", "Semantic retrieval returned an unreadable response.")
+            vectors.append(tuple(value / norm for value in vector))
+        return tuple(vectors)
+
+    def _embed(self, contents, task_type):
+        """Call the embedding endpoint once; callers degrade to lexical retrieval on any failure."""
+        try:
+            response = self.client.models.embed_content(
+                model=self.model,
+                contents=contents,
+                config={"task_type": task_type, "output_dimensionality": EMBEDDING_DIMENSIONS},
+            )
+        except DiscoveryError:
+            raise
+        except Exception as error:
+            raise provider_error("Gemini embeddings", error) from None
+        expected = len(contents) if isinstance(contents, list) else 1
+        return self._vectors(response, expected)
+
+    def score(self, query: str, documents: list[tuple[str, str, str]]) -> dict[str, float]:
+        """Return cosine similarity by document id, caching public documents and short-lived queries."""
+        if not query.strip() or not documents:
+            return {}
+        started = time.monotonic()
+        serialized = json.dumps(documents, ensure_ascii=False, separators=(",", ":"))
+        document_key = (self.model, hashlib.sha256(serialized.encode()).hexdigest())
+        document_vectors = self.document_cache.get(document_key)
+        document_hit = document_vectors is not None
+        if document_vectors is None:
+            contents = [f"title: {title} | text: {text}" for _, title, text in documents]
+            document_vectors = self._embed(contents, "RETRIEVAL_DOCUMENT")
+            self.document_cache.put(document_key, document_vectors)
+
+        query_key = (self.model, hashlib.sha256(query.encode()).hexdigest())
+        query_vectors = self.query_cache.get(query_key)
+        query_hit = query_vectors is not None
+        if query_vectors is None:
+            query_vectors = self._embed(query, "RETRIEVAL_QUERY")
+            self.query_cache.put(query_key, query_vectors)
+        query_vector = query_vectors[0]
+        scores = {document[0]: sum(a * b for a, b in zip(query_vector, vector))
+                  for document, vector in zip(documents, document_vectors)}
+        logger.info(
+            "semantic_retrieval provider=Gemini model=%s document_cache_hit=%s "
+            "query_cache_hit=%s documents=%d latency_ms=%d",
+            self.model, document_hit, query_hit, len(documents),
+            (time.monotonic() - started) * 1000,
+        )
+        return scores
+
+
 class GeminiProvider:
     """Calls Gemini to analyze the request, extract candidates and judge recommendations."""
     def __init__(self, settings: Settings, *, client=None):
@@ -254,15 +479,28 @@ class GeminiProvider:
             raise DiscoveryError("request_limit", "The generation limit for this request was reached.")
         self.calls += 1
         started = time.monotonic()
+        request = dict(model=self.model,
+            contents=json.dumps({"task": task, "data": payload}, ensure_ascii=False),
+            config={"system_instruction": _SYSTEM, "temperature": 0,
+                    "max_output_tokens": 4096, "response_mime_type": "application/json",
+                    "response_json_schema": schema,
+                    "automatic_function_calling": {"disable": True}})
         try:
-            response = self.client.models.generate_content(model=self.model,
-                contents=json.dumps({"task": task, "data": payload}, ensure_ascii=False),
-                config={"system_instruction": _SYSTEM, "temperature": 0,
-                        "max_output_tokens": 4096, "response_mime_type": "application/json",
-                        "response_json_schema": schema,
-                        "automatic_function_calling": {"disable": True}})
+            response = self.client.models.generate_content(**request)
         except Exception as error:
-            raise provider_error("Gemini", error) from None
+            # A 503 means Gemini is briefly overloaded, so one more try often works. The retry spends one
+            # of the request's four calls, so the per-request limit still holds; any other failure
+            # (quota, authentication, timeout, a bad request) is not retried.
+            if error_status(error) != 503 or self.calls >= 4:
+                raise provider_error("Gemini", error) from None
+            logger.info("provider_retry provider=Gemini call=%d http_status=503 pause_s=%s",
+                        self.calls, GEMINI_RETRY_PAUSE)
+            time.sleep(GEMINI_RETRY_PAUSE)
+            self.calls += 1
+            try:
+                response = self.client.models.generate_content(**request)
+            except Exception as retry_error:
+                raise provider_error("Gemini", retry_error) from None
         logger.info("generation provider=Gemini call=%d latency_ms=%d", self.calls,
                     (time.monotonic() - started) * 1000)
         try:
@@ -280,12 +518,17 @@ class GeminiProvider:
         data = self._json("""Analyze the listener's request before retrieval. Return up to 20 criteria
 using only meaning present in the description or reference. Use must_have or must_avoid only for an
 explicit requirement or exclusion such as must, only, no, without, required, a language-only request,
-or a requested recording version. Treat mood, energy and activity fit as preferences unless the user
+or a requested recording version. Vocal requirements and exclusions such as clean singing,
+instrumental, no vocals and no screaming are always explicit: use must_have or must_avoid for them,
+never preference. Treat mood, energy and activity fit as preferences unless the user
 explicitly makes them mandatory. Weight preferences from 1 to 3; words such as very or most important
 increase weight. source_text must be a short verbatim substring of the request or reference. You may
 infer a closely entailed preference, such as low energy from very peaceful, but its source_text must
 still quote the user's words. Produce one or two concise music-search queries without filler such as
-'I want', and add helpful synonyms while preserving all hard criteria. Never include URLs.""",
+'I want', and add helpful synonyms while preserving all hard criteria. Phrase each query to find
+pages that name and describe specific songs or artists, such as 'best ... songs', 'top ... artists'
+or 'recommended ... albums'. Avoid words that mostly return streams, mixes, playlists or radio
+channels, such as 'beats', 'mix', 'playlist', 'radio', '24/7' or 'to study to'. Never include URLs.""",
             {"request": asdict(request)}, _INTENT_SCHEMA)
         try:
             rows = data["criteria"]
@@ -303,15 +546,7 @@ still quote the user's words. Produce one or two concise music-search queries wi
                     criterion = replace(criterion, kind="preference")
                 criteria.append(criterion)
             intent = validate_parsed_intent(request, ParsedIntent(criteria, strings(queries, 2, 200)))
-            original = normalize(request.description + " " + (request.reference_song or ""))
-            for phrase in re.findall(
-                    r"\b(?:no vocals|without vocals|no screaming|without screaming|clean singing|instrumental|sem vocais|sem voz|sem gritos)\b",
-                    original):
-                if not any(c.kind != "preference"
-                           and normalize(phrase) in normalize(c.source_text + " " + c.value)
-                           for c in intent.criteria):
-                    raise ValueError()
-            return intent
+            return validate_parsed_intent(request, _harden_explicit_vocals(request, intent))
         except (KeyError, TypeError, ValueError):
             raise DiscoveryError("invalid_response", "Gemini returned invalid request analysis.") from None
 
@@ -321,7 +556,9 @@ still quote the user's words. Produce one or two concise music-search queries wi
 web or song_card evidence. Cite only sources establishing that identity. Do not turn a work's composer
 into its performer; if no performer is established, skip the candidate. A reference is context, not
 evidence for new facts. Do not return albums, playlists, applications, labels or recording studios as
-songs. Mark those entity_type not_song. Prefer identities from evidence that overlaps the analyzed intent.""",
+songs. Mark those entity_type not_song. Prefer identities from evidence that overlaps the analyzed intent.
+When two sources are equally relevant, prefer the music-specialist source. A specialist domain alone is
+not proof that a song identity or characteristic is correct.""",
             {"request": asdict(request), "intent": asdict(intent),
              "evidence": [asdict(e) for e in evidence]}, _CANDIDATE_SCHEMA)
         try:
@@ -657,3 +894,133 @@ class YouTubeProvider:
         logger.info("retrieval provider=YouTube cache_hit=%s matched=%s latency_ms=%d", hit, bool(match),
                     (time.monotonic() - started) * 1000)
         return VideoLink(match["id"], match["title"], match["channel"]) if match else None
+
+
+_spotify_budget = SearchBudget(limit=500)  # Spotify rate-limits by time window; this is a soft daily guard
+_spotify_cache = TTLCache(ttl=86400, capacity=512)
+_spotify_token_cache = TTLCache(ttl=3000, capacity=4)  # tokens last an hour; refresh a little early
+_TRACK_ID = re.compile(r"[A-Za-z0-9]{22}")
+# Spotify appends the reissue to a title ("Take Five - Remastered 2013"), which is still the same song.
+_EDITION_SUFFIX = re.compile(
+    r"\s*(?:-\s*|[(\[]\s*)(?:\d{4}\s+)?(?:remaster(?:ed)?(?:\s+\d{4})?|mono|stereo|(?:single|album|original) version"
+    r"|(?:\d{4}\s+)?digital remaster)\s*[)\]]?\s*$", re.I)
+
+
+def _base_title(title):
+    """Drop reissue suffixes such as '- Remastered 2011' so the title compares with the plain one."""
+    previous = None
+    while previous != title:
+        previous, title = title, _EDITION_SUFFIX.sub("", title)
+    return title
+
+
+def pick_track(title, artist, tracks):
+    """Return the track that is clearly this song by this artist, or None rather than a guess."""
+    want_title, want_artist = normalize(_base_title(title)), normalize(_primary_artist(artist))
+    if not want_title or not want_artist:
+        return None
+    asked = set(normalize(f"{title} {artist}").split())
+    best, best_score = None, 0.0
+    for rank, track in enumerate(tracks):
+        track_title = normalize(_base_title(track["title"]))
+        if not _has_phrase(track_title, want_title):
+            continue
+        if not any(_has_phrase(normalize(name), want_artist) or _has_phrase(want_artist, normalize(name))
+                   for name in track["artists"] if normalize(name)):
+            continue
+        if _VARIANT_WORDS & (set(track_title.split()) - asked):
+            continue
+        score = (3.0 if track_title == want_title else 0.0) - rank * 0.1
+        if best is None or score > best_score:
+            best, best_score = track, score
+    return best
+
+
+class SpotifyProvider:
+    """Resolve recommendations to exact Spotify tracks with the Web API (client credentials, no user login)."""
+
+    def __init__(self, client_id, client_secret, *, session=None, cache=None, token_cache=None, budget=None):
+        """Store the app credentials and set up the session, caches and call budget."""
+        self._id, self._secret = client_id, client_secret
+        self.session = session or requests.Session()
+        self.cache = cache if cache is not None else _spotify_cache
+        self.token_cache = token_cache if token_cache is not None else _spotify_token_cache
+        self.budget = budget if budget is not None else _spotify_budget
+
+    def find_tracks(self, songs, *, limit=5, time_budget=10.0, clock=time.monotonic):
+        """Match (title, artist) pairs to tracks. Never raises: a skipped or failed lookup is None."""
+        results = [None] * len(songs)
+        deadline = clock() + time_budget
+        allow_calls = True
+        for index, (title, artist) in enumerate(songs[:limit]):
+            if clock() > deadline:
+                break
+            try:
+                results[index] = self._find(title, artist, allow_calls)
+            except DiscoveryError as error:
+                logger.info("spotify_lookup_failed code=%s", error.code)
+                allow_calls = False  # cached songs still resolve; no more API calls this run
+        return results
+
+    def _token(self):
+        """Return an app access token, requesting a new one only when the cached one has lapsed."""
+        key = hashlib.sha256(f"{self._id}:{self._secret}".encode()).hexdigest()
+        token = self.token_cache.get(key)
+        if token:
+            return token
+        try:
+            data = http_json(self.session, "post", "https://accounts.spotify.com/api/token",
+                             auth=(self._id, self._secret), data={"grant_type": "client_credentials"})
+        except DiscoveryError:
+            raise
+        except (requests.RequestException, ValueError) as error:
+            self.budget.block(3600)  # a rejected secret would fail every song the same way
+            raise provider_error("Spotify", error) from None
+        token = data.get("access_token") if isinstance(data, dict) else None
+        if not isinstance(token, str) or not token or len(token) > 2000:
+            raise DiscoveryError("invalid_response", "Spotify returned an unreadable response.")
+        self.token_cache.put(key, token)
+        return token
+
+    def _find(self, title, artist, allow_calls):
+        """Look up one song's track, using the cache first and spending budget only when allowed."""
+        key = (normalize(title), normalize(artist))
+        data = self.cache.get(key)
+        hit = data is not None
+        started = time.monotonic()
+        if not hit:
+            if not allow_calls or not self.budget.take():
+                return None
+            query = f'track:"{title.replace(chr(34), " ")}" artist:"{_primary_artist(artist).replace(chr(34), " ")}"'
+            try:
+                data = http_json(self.session, "get", "https://api.spotify.com/v1/search",
+                                 params={"q": query[:200], "type": "track", "limit": 5},
+                                 headers={"Authorization": f"Bearer {self._token()}"})
+            except DiscoveryError:
+                raise
+            except (requests.RequestException, ValueError) as error:
+                status = getattr(getattr(error, "response", None), "status_code", None)
+                if status == 401:
+                    self.token_cache.put(hashlib.sha256(f"{self._id}:{self._secret}".encode()).hexdigest(), "")
+                if status in (401, 403, 429):
+                    self.budget.block(3600 if status != 429 else 300)
+                raise provider_error("Spotify", error) from None
+            items = data.get("tracks", {}).get("items") if isinstance(data, dict) else None
+            if not isinstance(items, list):
+                raise DiscoveryError("invalid_response", "Spotify returned an unreadable response.")
+            tracks = []
+            for item in items[:5]:
+                try:
+                    track_id, name = item["id"], item["name"]
+                    artists = [a["name"] for a in item["artists"]]
+                except (KeyError, TypeError):
+                    continue
+                if (isinstance(track_id, str) and _TRACK_ID.fullmatch(track_id) and isinstance(name, str)
+                        and artists and all(isinstance(a, str) for a in artists)):
+                    tracks.append({"id": track_id, "title": name[:200], "artists": [a[:100] for a in artists]})
+            data = {"tracks": tracks}
+            self.cache.put(key, data)
+        match = pick_track(title, artist, data["tracks"])
+        logger.info("retrieval provider=Spotify cache_hit=%s matched=%s latency_ms=%d", hit, bool(match),
+                    (time.monotonic() - started) * 1000)
+        return TrackLink(match["id"], match["title"], match["artists"][0]) if match else None

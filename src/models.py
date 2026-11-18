@@ -115,6 +115,19 @@ class VideoLink:
 
 
 @dataclass(frozen=True)
+class TrackLink:
+    """A Spotify track matched to a recommendation; the URL is always rebuilt from the id."""
+    track_id: str
+    title: str
+    artist: str
+
+    @property
+    def url(self) -> str:
+        """Return the Spotify page for this track."""
+        return f"https://open.spotify.com/track/{self.track_id}"
+
+
+@dataclass(frozen=True)
 class Recommendation:
     """A recommended song with its explanation, sources and validation checks."""
     title: str
@@ -127,6 +140,7 @@ class Recommendation:
     preference_checks: list[PreferenceCheck] = field(default_factory=list)
     fit_score: float | None = None  # None: the fit was never validated, so no score exists
     video: VideoLink | None = None  # None: no confident YouTube match, the UI falls back to a search link
+    track: TrackLink | None = None  # None: no confident Spotify match, the UI falls back to a search link
 
 
 @dataclass
@@ -138,3 +152,6 @@ class DiscoveryResult:
     intent: ParsedIntent | None = None
     used_partial_matches: bool = False
     notices: list[str] = field(default_factory=list)
+    # Not empty when no song could be verified against the request's hard criteria: the songs shown
+    # are only named by their sources, and this lists the requirements none of them could confirm.
+    unverified_requirements: list[str] = field(default_factory=list)
