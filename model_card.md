@@ -519,7 +519,7 @@ without checking the cited source.
 
 | Check | Result |
 | --- | --- |
-| Automated tests (controlled provider responses, no network) | 593 of 593 pass |
+| Automated tests (controlled provider responses, no network) | 638 of 638 pass |
 | Deterministic six-request local retrieval fixture | 1.00 micro precision, 1.00 recall (15 relevant cards retrieved out of 15 returned) |
 | Hybrid fusion and fallback tests | Semantic agreement reranks qualified cards; at most two high-similarity cards fill unused slots; failures reproduce lexical output |
 | Music-source search tests | One general and one domain-focused call stay within the two-call limit; safe/relevance filters still apply; lookalike hosts remain general; focused failure keeps general results |
@@ -577,7 +577,7 @@ shared types in `src/models.py`, text and URL helpers in `src/utils.py`, evidenc
 checks in `src/validation.py`, the staged workflow in `src/discovery.py`, and provider
 wiring plus `find_music` in `src/composition.py`. `find_music` is still the one entry
 point for the command line and Streamlit, `src/rag.py` no longer exists, and the
-suite now has 593 passing tests. `tests/test_rag.py` keeps its name and now covers
+suite now has 638 passing tests. `tests/test_rag.py` keeps its name and now covers
 the whole discovery pipeline.
 
 **A suggestion I did not accept as written.** The assistant's first retrieval index

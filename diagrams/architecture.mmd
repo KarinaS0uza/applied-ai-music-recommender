@@ -14,19 +14,26 @@ flowchart TD
     RAG --> Intent["Gemini: analyze criteria and focused queries"]
     Intent --> Web["Tavily: one general + one music-source-focused search"]
     RAG -->|"Enhanced mode"| Docs["Hybrid lexical + semantic retrieval: up to four cards and two guides"]
-    Web --> Extract["Gemini: extract supported candidates"]
+    Web --> Extract["Gemini: extract up to 30 song and artist pairs"]
     Docs --> Extract
-    Extract -->|"Enhanced mode"| Metadata["MusicBrainz: recording identities and versions"]
-    Extract --> Generate["Gemini: evidence-grounded selection"]
+    Extract --> Identity["Validate identities in the cited sources, at most nine songs per source"]
+    Identity --> Order["Order for judging: request-fitting songs first, sources take turns"]
+    Order -->|"Enhanced mode"| Metadata["MusicBrainz: recording identities and versions"]
+    Order --> Generate["Gemini: judge the best ten against the evidence"]
     Metadata --> Generate
-    Generate --> Validate["Validate evidence and score weighted preferences"]
-    Validate --> Results["Up to nine exact or partial matches with uncertainties"]
+    Generate --> Validate["Validate verbatim quotes from source text or title, score weighted preferences"]
+    Validate -->|"Nothing held up and candidates remain"| FollowUp["One follow-up: judge the next ten"]
+    FollowUp --> Validate
+    Validate --> TopUp["Broad requests only: fill with unscored source-named songs"]
+    TopUp --> Results["Up to nine exact or partial matches with uncertainties"]
     Results --> Human["Listener reviews excerpts and original sources"]
     Checks["pytest: controlled pipeline, provider and UI checks"] -.-> Validate
     Review["Recorded six-request retrieval comparison"] -.-> Docs
 
     Validate -->|"Invalid model output"| Degrade["Retry once, then warn and keep only source-identified songs"]
     Degrade --> Results
+    FollowUp -->|"Follow-up fails"| Unchecked["Warn that some songs were not checked"]
+    Unchecked --> Results
     Results -->|"No supported match"| Fallback["Up to five collection songs, else unverified songs, else a related video, else a plain message"]
     Fallback --> Human
     Guard["Input checks, call limits, timeouts, safe errors"] -.-> RAG

@@ -47,19 +47,26 @@ flowchart TD
     RAG --> Intent["Gemini: analyze criteria and focused queries"]
     Intent --> Web["Tavily: one general + one music-source-focused search"]
     RAG -->|"Enhanced mode"| Docs["Hybrid lexical + semantic retrieval: up to four cards and two guides"]
-    Web --> Extract["Gemini: extract supported candidates"]
+    Web --> Extract["Gemini: extract up to 30 song and artist pairs"]
     Docs --> Extract
-    Extract -->|"Enhanced mode"| Metadata["MusicBrainz: recording identities and versions"]
-    Extract --> Generate["Gemini: evidence-grounded selection"]
+    Extract --> Identity["Validate identities in the cited sources, at most nine songs per source"]
+    Identity --> Order["Order for judging: request-fitting songs first, sources take turns"]
+    Order -->|"Enhanced mode"| Metadata["MusicBrainz: recording identities and versions"]
+    Order --> Generate["Gemini: judge the best ten against the evidence"]
     Metadata --> Generate
-    Generate --> Validate["Validate evidence and score weighted preferences"]
-    Validate --> Results["Up to nine exact or partial matches with uncertainties"]
+    Generate --> Validate["Validate verbatim quotes from source text or title, score weighted preferences"]
+    Validate -->|"Nothing held up and candidates remain"| FollowUp["One follow-up: judge the next ten"]
+    FollowUp --> Validate
+    Validate --> TopUp["Broad requests only: fill with unscored source-named songs"]
+    TopUp --> Results["Up to nine exact or partial matches with uncertainties"]
     Results --> Human["Listener reviews excerpts and original sources"]
     Checks["pytest: controlled pipeline, provider and UI checks"] -.-> Validate
     Review["Recorded six-request retrieval comparison"] -.-> Docs
 
     Validate -->|"Invalid model output"| Degrade["Retry once, then warn and keep only source-identified songs"]
     Degrade --> Results
+    FollowUp -->|"Follow-up fails"| Unchecked["Warn that some songs were not checked"]
+    Unchecked --> Results
     Results -->|"No supported match"| Fallback["Up to five collection songs, else unverified songs, else a related video, else a plain message"]
     Fallback --> Human
     Guard["Input checks, call limits, timeouts, safe errors"] -.-> RAG
@@ -75,9 +82,15 @@ explicit set of music-focused domains. It applies the same URL, content and
 request-relevance checks to both, deduplicates them, and places qualifying specialist
 sources first without treating their domain as proof. In enhanced mode (always on in the Streamlit app, opt-in
 with `--enhanced` on the CLI) a hybrid lexical/semantic index adds relevant guide
-sections and song cards, and MusicBrainz adds recording identities. Gemini extracts and then
-evaluates candidates against that evidence. Python validates the result, computes
-the fit score and returns the top five.
+sections and song cards, and MusicBrainz adds recording identities. Gemini extracts up
+to 30 song and artist pairs, and Python keeps only pairs whose title and artist appear in a
+cited source, with at most nine songs from any one source so a long track list cannot crowd
+out the rest. Candidates are then ordered so songs the evidence ties to the request come
+first and sources take turns. Gemini judges the best ten against the evidence; if none of them
+holds up, one follow-up call judges the next ten. Python checks that every quote is a verbatim
+passage of the cited source's text or title, computes the fit score and returns up to nine
+songs. For a broad request with no hard requirement, any remaining slots are filled with
+unscored songs that a source names.
 
 **Where people and tests check the AI.** The listener is the human in the loop:
 every result shows its supporting excerpts, stated uncertainties and original
@@ -595,25 +608,28 @@ MusicBrainz and Gemini). They show output that validated; the failure cases are
 the pasted text in sample 5, which is the evidence that gets graded. Live results
 vary from run to run, so a rerun can return different songs.
 
-![The Find music tab after "classic bossa nova for a dinner party": five recommendation cards with match scores, a note on how many details could not be confirmed, and YouTube and Spotify links](assets/01-find-music-bossa-nova-results.png)
+![The Find music tab and the Music Collection panel after "piano songs for sleeping": the request box, the "Your vibe" line reading Piano and Sleeping, and the collection form beside it](assets/01.1-find-music-piano-songs-for-sleeping-search-and-collection.png)
 
-*Find music: "classic bossa nova for a dinner party" returned five songs. Each card
-shows a match score and says how many details the sources could not confirm.*
+*Search and collection: the Find music box with "piano songs for sleeping" and the
+"Your vibe" summary of the request, next to the Music Collection form, which needs no
+API keys.*
 
-![The "Why these songs?" panel, listing for each song the reason it may fit, what could not be confirmed, a quoted excerpt from the source and a link to that source](assets/02-why-these-songs-evidence.png)
+![Fresh finds for "piano songs for sleeping": nine recommendation cards with match scores, a reason each song fits, and YouTube and Spotify links](assets/01.2-find-music-piano-songs-for-sleeping-fresh-finds.png)
 
-*The "Why these songs?" panel is the human check: for each song it shows what the
-evidence supports, what it does not establish, the quoted excerpt and the source.*
+*Fresh finds: nine songs, each with a match score, a one-line reason it fits and
+YouTube and Spotify links. The "Why these songs?" and "Sources checked" panels below
+the cards hold the quoted evidence.*
 
-![The Find music tab after "upbeat Korean pop for a morning run": a "must-haves" line reading Korean pop and five K-pop recommendation cards](assets/03-find-music-korean-pop-must-haves.png)
+![The Find music tab and the Music Collection panel after "upbeat samba for a weekend barbecue": the request box, the "Your vibe" line reading Samba, Upbeat and Weekend barbecue, and the collection form beside it](assets/02.1-find-music-upbeat-samba-barbecue-search-and-collection.png)
 
-*A request with a hard requirement ("Korean pop") is shown under "Your must-haves"
-and every returned song was checked against it.*
+*Search and collection: "upbeat samba for a weekend barbecue" with its "Your vibe"
+summary.*
 
-![The Music Collection panel ranking the offline catalog for jazz and relaxed, with five catalog cards showing match scores and why each fits](assets/04-music-collection-jazz-relaxed.png)
+![Fresh finds for "upbeat samba for a weekend barbecue": nine recommendation cards with match scores from 67% down to 17% and a note on how many details could not be confirmed](assets/02.2-find-music-upbeat-samba-barbecue-fresh-finds.png)
 
-*Music Collection: ranking the offline catalog for jazz and relaxed. This path needs
-no API keys.*
+*Fresh finds: nine songs with match scores from 67% to 17%. Each card says how many
+details the sources could not confirm, so a loose match such as a ballroom samba
+track is shown as a weaker fit rather than hidden.*
 
 ## Testing summary
 
@@ -622,30 +638,31 @@ python -m pytest -q
 ```
 
 ```text
-........................................................................ [ 12%]
-........................................................................ [ 24%]
-........................................................................ [ 36%]
-........................................................................ [ 48%]
-........................................................................ [ 60%]
-........................................................................ [ 72%]
-........................................................................ [ 84%]
-........................................................................ [ 97%]
-.................                                                        [100%]
-593 passed in 6.63s
+........................................................................ [ 11%]
+........................................................................ [ 23%]
+........................................................................ [ 34%]
+........................................................................ [ 45%]
+........................................................................ [ 56%]
+........................................................................ [ 68%]
+........................................................................ [ 79%]
+........................................................................ [ 90%]
+..............................................................           [100%]
+638 passed in 7.43s
 ```
 
 | Test file | Tests | What it covers |
 | --- | --- | --- |
-| `tests/test_rag.py` | 92 | The full discovery pipeline: evidence rules, retries, fallbacks, provider wiring |
-| `tests/test_validation.py` | 89 | Validators: request and intent limits, citation and quote checks, scoring, model feedback |
+| `tests/test_rag.py` | 100 | The full discovery pipeline: evidence rules, retries, fallbacks, provider wiring |
+| `tests/test_validation.py` | 97 | Validators: request and intent limits, citation and quote checks, scoring, model feedback |
 | `tests/test_utils.py` | 36 | Text normalization and the safe-URL rules |
 | `tests/test_models.py` | 5 | Shared types and their defaults |
-| `tests/test_providers.py` | 147 | Tavily, focused-source search, Gemini generation/embeddings and MusicBrainz: limits, caching, safe errors, malformed output |
+| `tests/test_providers.py` | 148 | Tavily, focused-source search, Gemini generation/embeddings and MusicBrainz: limits, caching, safe errors, malformed output |
 | `tests/test_knowledge.py` | 54 | Hybrid local retrieval: lexical safety, semantic fusion/fallback, aliases, relevance benchmark, document loading |
 | `tests/test_song_cards.py` | 4 | Expanded card count, source metadata, coverage groups and visible mood/tempo/activity evidence |
-| `tests/test_app.py` | 90 | Streamlit pages, configuration, fallbacks, escaping, throttling, catalog mode |
-| `tests/test_main.py` | 15 | Command-line output and failure exits |
-| `tests/test_recommender.py` | 29 | CSV ranking, strategies, diversity penalties, genre resolution |
+| `tests/test_app.py` | 96 | Streamlit pages, configuration, fallbacks, escaping, throttling, catalog mode |
+| `tests/test_main.py` | 16 | Command-line output and failure exits |
+| `tests/test_recommender.py` | 30 | CSV ranking, strategies, diversity penalties, genre resolution |
+| `tests/test_spotify.py` | 20 | Spotify track lookup, its settings and how platform links are rendered |
 | `tests/test_youtube.py` | 32 | Strict video matching, quota limits, safe fallback |
 
 The guardrail checks can be run on their own:
@@ -668,7 +685,7 @@ tests/test_rag.py::test_unsafe_source_urls_are_rejected[https://user:password@ex
 tests/test_rag.py::test_unsafe_source_urls_are_rejected[http://127.0.0.1/a] PASSED
 tests/test_rag.py::test_unsafe_source_urls_are_rejected[http://localhost] PASSED
 tests/test_rag.py::test_unsafe_source_urls_are_rejected[https://example.org/ bad] PASSED
-13 passed, 71 deselected
+13 passed, 87 deselected
 ```
 
 ### Evaluation results
@@ -708,7 +725,7 @@ Guardrail behavior, from the automated suite:
 | Failed validation after the retry | Source-identified songs listed as unscored; none when the request has hard requirements | Pass |
 | MusicBrainz requests across sessions | At least 1.05 s apart, cached repeats skip the request | Pass (injected clock) |
 
-**Result.** 593 of 593 automated tests pass, and the retrieval comparison shows a
+**Result.** 638 of 638 automated tests pass, and the retrieval comparison shows a
 clear gain on 2 of 6 requests, a partial gain on 2 and no gain on 2.
 
 **What worked.** Requiring exact excerpts for every claim made unsupported answers
